@@ -1,49 +1,76 @@
 #include <glob/glob.h>
 #include <glob/version.h>
 
-#include <cxxopts.hpp>
+#include <clipp.h>
 #include <iostream>
 #include <string>
+#include <set>
 
-int main(int argc, char** argv) {
-  cxxopts::Options options(argv[0], "Run glob to find all the pathnames matching a specified pattern");
+int main(int argc, const char** argv) {
+	using namespace clipp;
 
-  bool recursive;
-  std::vector<std::string> patterns;
+	bool recursive = false;
+	std::vector<std::string> patterns;
+	std::set<std::string> tags;
 
-  // clang-format off
-  options.add_options()
-    ("h,help", "Show help")
-    ("v,version", "Print the current version number")
-    ("r,recursive", "Run glob recursively", cxxopts::value<bool>(recursive)->default_value("false"))
-    ("i,input", "Patterns to match", cxxopts::value<std::vector<std::string>>(patterns))
-  ;
-  // clang-format on
+	enum class mode { none, help, version, glob };
+	mode selected = mode::none;
 
-  auto result = options.parse(argc, argv);
+	auto options = (
+		option("-r", "--recursive").set(recursive) % "Run glob recursively",
+		repeatable( option("-i", "--input").set(selected, mode::glob) & values("patterns", patterns) % "Patterns to match" )
+	);
+	auto cli = (
+		(options
+		| command("-h", "--help").set(selected, mode::help) % "Show this screen."
+		| command("-v", "--version").set(selected, mode::version) % "Show version."
+		)
+	);
 
-  if (result["help"].as<bool>()) {
-    std::cout << options.help() << std::endl;
-    return 0;
-  } else if (result["version"].as<bool>()) {
-    std::cout << "glob, version " << GLOB_VERSION << std::endl;
-    return 0;
-  }
+	auto help = [cli]()
+	{
+		std::cout << make_man_page(cli, "glob")
+			.prepend_section("DESCRIPTION", "    Run glob to find all the pathnames matching a specified pattern")
+			.append_section("LICENSE", "    MIT");
+	};
 
-  if (patterns.empty()) {
-    std::cout << options.help() << std::endl;
-    return 0;
-  }
+	parse(argc, argv, cli);
+	switch (selected)
+	{
+	default:
+	case mode::none:
+	case mode::help:
+		help();
+		return EXIT_SUCCESS;
 
-  if (recursive) {
-    for (auto& match: glob::rglob(patterns)) {
-     std::cout << match << "\n";
-    } 
-  } else {
-    for (auto& match: glob::glob(patterns)) {
-      std::cout << match << "\n";
-    }
-  }
+	case mode::version:
+		std::cout << "glob, version " << GLOB_VERSION << std::endl;
+		return EXIT_SUCCESS;
 
-  return 0;
+	case mode::glob:
+		break;
+	}
+
+	if (patterns.empty())
+	{
+		help();
+		return EXIT_SUCCESS;
+	}
+
+	if (recursive)
+	{
+		for (auto& match : glob::rglob(patterns))
+		{
+			std::cout << match << "\n";
+		}
+	}
+	else
+	{
+		for (auto& match : glob::glob(patterns))
+		{
+			std::cout << match << "\n";
+		}
+	}
+
+	return EXIT_SUCCESS;
 }
