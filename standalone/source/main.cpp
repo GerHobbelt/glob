@@ -6,7 +6,8 @@
 #include <string>
 #include <set>
 
-int main(int argc, const char** argv) {
+int main(int argc, const char** argv)
+{
 	using namespace clipp;
 
 	bool recursive = false;
@@ -18,7 +19,7 @@ int main(int argc, const char** argv) {
 
 	auto options = (
 		option("-r", "--recursive").set(recursive) % "Run glob recursively",
-		repeatable( option("-i", "--input").set(selected, mode::glob) & values("patterns", patterns) % "Patterns to match" )
+		repeatable( option("-i", "--input").set(selected, mode::glob) & values("patterns", patterns) ) % "Patterns to match"
 	);
 	auto cli = (
 		(options
