@@ -25,12 +25,13 @@ int main(int argc, const char** argv)
 		(options
 		| command("-h", "--help").set(selected, mode::help) % "Show this screen."
 		| command("-v", "--version").set(selected, mode::version) % "Show version."
-		)
+		),
+		any_other(patterns).set(selected, mode::glob)
 	);
 
 	auto help = [cli]()
 	{
-		std::cout << make_man_page(cli, "glob")
+		std::cerr << make_man_page(cli, "glob")
 			.prepend_section("DESCRIPTION", "    Run glob to find all the pathnames matching a specified pattern")
 			.append_section("LICENSE", "    MIT");
 	};
