@@ -344,9 +344,23 @@ std::vector<fs::path> glob(const std::string &pathname) {
   return glob(pathname, false);
 }
 
+std::vector<std::filesystem::path> glob_path(const std::string& basepath, const std::string& pathname) 
+{
+  return glob(fs::path(basepath) / pathname, false);
+}
+
+
+
 std::vector<fs::path> rglob(const std::string &pathname) {
   return glob(pathname, true);
 }
+
+std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const std::string& pathname) 
+{
+  return glob(fs::path(basepath) / pathname, true);
+}
+
+
 
 std::vector<std::filesystem::path> glob(const std::vector<std::string> &pathnames) {
   std::vector<std::filesystem::path> result;
@@ -358,6 +372,20 @@ std::vector<std::filesystem::path> glob(const std::vector<std::string> &pathname
   return result;
 }
 
+std::vector<std::filesystem::path> glob_path(const std::string& basepath, const std::vector<std::string>& pathnames) 
+{
+  std::vector<std::filesystem::path> result;
+  for (auto& pathname : pathnames)
+  {
+	for (auto& match : glob(fs::path(basepath) / pathname, false))
+	{
+	  result.push_back(std::move(match));
+	}
+  }
+  return result;
+}
+
+
 std::vector<std::filesystem::path> rglob(const std::vector<std::string> &pathnames) {
   std::vector<std::filesystem::path> result;
   for (auto &pathname : pathnames) {
@@ -367,15 +395,35 @@ std::vector<std::filesystem::path> rglob(const std::vector<std::string> &pathnam
   }
   return result;
 }
+std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const std::vector<std::string>& pathnames) 
+{
+  std::vector<std::filesystem::path> result;
+  for (auto &pathname : pathnames) {
+    for (auto &match : glob(fs::path(basepath) / pathname, true)) {
+      result.push_back(std::move(match));
+    }
+  }
+  return result;
+}
+
 
 std::vector<std::filesystem::path>
 glob(const std::initializer_list<std::string> &pathnames) {
   return glob(std::vector<std::string>(pathnames));
 }
 
+std::vector<std::filesystem::path> glob_path(const std::string& basepath,
+											 const std::initializer_list<std::string>& pathnames)
+{
+    return glob_path(basepath, std::vector<std::string>(pathnames));
+}
 std::vector<std::filesystem::path>
 rglob(const std::initializer_list<std::string> &pathnames) {
   return rglob(std::vector<std::string>(pathnames));
 }
-
+std::vector<std::filesystem::path> rglob_path(const std::string& basepath,
+											  const std::initializer_list<std::string>& pathnames)
+{
+    return rglob_path(basepath, std::vector<std::string>(pathnames));
+}
 } // namespace glob
