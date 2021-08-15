@@ -43,7 +43,7 @@ int main(int argc, char** argv) {
 
     if (!basepath.empty()) {
 
-      for (auto& match : glob::rglob_path(basepath, patterns)) {
+      for (auto& match : glob::rglob(basepath, patterns)) {
 
         std::cout << match << "\n";
       }
@@ -58,7 +58,7 @@ int main(int argc, char** argv) {
 
     if (!basepath.empty()) {
 
-      for (auto& match : glob::glob_path(basepath, patterns)) {
+      for (auto& match : glob::glob(basepath, patterns)) {
 
         std::cout << match << "\n";
       }

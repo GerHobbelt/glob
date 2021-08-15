@@ -17,13 +17,17 @@ namespace glob {
 /// Helper struct for extended options
 struct options {
   fs::path basepath;
-  std::vector<fs::path> pathnames;
+  std::vector<std::string> pathnames;
   bool include_hidden_entries = false;
-
+  options(const fs::path& basepath, std::vector<std::string> pathnames, bool include_hidden_entries = false)
+	  : basepath(basepath),
+		pathnames(pathnames),
+		include_hidden_entries(include_hidden_entries)
+  {};
   /// \param basepath the root directory to run in
   /// \param pathname string containing a path specification
   /// Convenience constructor for use when only a single pathspec will be used
-  options(const fs::path& basepath, const fs::path& pathname, bool include_hidden_entries = false) : basepath(basepath), pathnames({pathname}), include_hidden_entries(include_hidden_entries) {};
+  options(const fs::path& basepath, const std::string& pathname, bool include_hidden_entries = false) : basepath(basepath), pathnames({pathname}), include_hidden_entries(include_hidden_entries) {};
 };
 
 /// \param pathname string containing a path specification
@@ -35,16 +39,6 @@ struct options {
 GLOBLIB_IMPL
 std::vector<fs::path> glob(const std::string &pathname);
 
-/// \param basepath the root directory to run in
-/// \param pathname string containing a path specification
-/// \return vector of paths that match the pathname
-///
-/// Pathnames can be absolute (/usr/src/Foo/Makefile) or relative (../../Tools/*/*.gif)
-/// Pathnames can contain shell-style wildcards
-/// Broken symlinks are included in the results (as in the shell)
-GLOBLIB_IMPL
-std::vector<std::filesystem::path> glob_path(const std::string& basepath, const std::string& pathname);
-
 /// \param pathnames string containing a path specification
 /// \return vector of paths that match the pathname
 ///
@@ -54,31 +48,31 @@ std::vector<std::filesystem::path> glob_path(const std::string& basepath, const 
 GLOBLIB_IMPL
 std::vector<fs::path> rglob(const std::string &pathname);
 
-/// \param basepath the root directory to run in
-/// \param pathnames string containing a path specification
+/// \param opts settings to use
 /// \return vector of paths that match the pathname
+///
+/// Pathnames can be absolute (/usr/src/Foo/Makefile) or relative (../../Tools/*/*.gif)
+/// Pathnames can contain shell-style wildcards
+/// Broken symlinks are included in the results (as in the shell)
+GLOBLIB_IMPL
+std::vector<std::filesystem::path> glob(const glob::options& opts);
+
+/// \param opts settings to use
+/// \return vector of paths that match
 ///
 /// Globs recursively.
 /// The pattern “**” will match any files and zero or more directories, subdirectories and
 /// symbolic links to directories.
 GLOBLIB_IMPL
-std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const std::string& pathname);
+std::vector<std::filesystem::path> rglob(const glob::options& opts);
 
 /// Runs `glob` against each pathname in `pathnames` and accumulates the results
 GLOBLIB_IMPL
 std::vector<std::filesystem::path> glob(const std::vector<std::string> &pathnames);
 
-/// Runs `glob` against each pathname in `pathnames` and accumulates the results
-GLOBLIB_IMPL
-std::vector<std::filesystem::path> glob_path(const std::string& basepath, const std::vector<std::string>& pathnames);
-
 /// Runs `rglob` against each pathname in `pathnames` and accumulates the results
 GLOBLIB_IMPL
 std::vector<std::filesystem::path> rglob(const std::vector<std::string> &pathnames);
-
-/// Runs `rglob` against each pathname in `pathnames` and accumulates the results
-GLOBLIB_IMPL
-std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const std::vector<std::string>& pathnames);
 
 /// Initializer list overload for convenience
 GLOBLIB_IMPL
@@ -87,17 +81,9 @@ glob(const std::initializer_list<std::string> &pathnames);
 
 /// Initializer list overload for convenience
 GLOBLIB_IMPL
-std::vector<std::filesystem::path> glob_path(const std::string& basepath,
-											 const std::initializer_list<std::string>& pathnames);
-/// Initializer list overload for convenience
-GLOBLIB_IMPL
 std::vector<std::filesystem::path>
 rglob(const std::initializer_list<std::string> &pathnames);
 
-/// Initializer list overload for convenience
-GLOBLIB_IMPL
-std::vector<std::filesystem::path> rglob_path(const std::string& basepath,
-											  const std::initializer_list<std::string>& pathnames);
 } // namespace glob
 
 #if (!defined(GLOBLIB_SEPARATE_COMPILATION) || (defined(GLOBLIB_SEPARATE_COMPILATION) && defined(GLOBLIB_INCLUDE_IMPLEMENTATION)))
@@ -548,19 +534,9 @@ namespace glob
 		return glob(pathname, false);
 	}
 
-	std::vector<std::filesystem::path> glob_path(const std::string& basepath, const std::string& pathname)
-	{
-		return glob(fs::path(basepath) / pathname, false);
-	}
-
 	std::vector<fs::path> rglob(const std::string& pathname)
 	{
 		return glob(pathname, true);
-	}
-
-	std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const std::string& pathname)
-	{
-		return glob(fs::path(basepath) / pathname, true);
 	}
 
 	std::vector<std::filesystem::path> glob(const std::vector<std::string>& pathnames)
@@ -576,12 +552,12 @@ namespace glob
 		return result;
 	}
 
-	std::vector<std::filesystem::path> glob_path(const std::string& basepath, const std::vector<std::string>& pathnames)
+	std::vector<std::filesystem::path> glob(const glob::options& opts)
 	{
 		std::vector<std::filesystem::path> result;
-		for (auto& pathname : pathnames)
+		for (auto& pathname : opts.pathnames)
 		{
-			for (auto& match : glob(fs::path(basepath) / pathname, false))
+			for (auto& match : glob(fs::path(opts.basepath) / pathname, false, false, opts.include_hidden_entries))
 			{
 				result.push_back(std::move(match));
 			}
@@ -601,13 +577,12 @@ namespace glob
 		}
 		return result;
 	}
-	std::vector<std::filesystem::path> rglob_path(const std::string& basepath,
-												  const std::vector<std::string>& pathnames)
+	std::vector<std::filesystem::path> rglob(const glob::options& opts)
 	{
 		std::vector<std::filesystem::path> result;
-		for (auto& pathname : pathnames)
+		for (auto& pathname : opts.pathnames)
 		{
-			for (auto& match : glob(fs::path(basepath) / pathname, true))
+			for (auto& match : glob(fs::path(opts.basepath) / pathname, true, false, opts.include_hidden_entries))
 			{
 				result.push_back(std::move(match));
 			}
@@ -620,19 +595,9 @@ namespace glob
 		return glob(std::vector<std::string>(pathnames));
 	}
 
-	std::vector<std::filesystem::path> glob_path(const std::string& basepath,
-												 const std::initializer_list<std::string>& pathnames)
-	{
-		return glob_path(basepath, std::vector<std::string>(pathnames));
-	}
 	std::vector<std::filesystem::path> rglob(const std::initializer_list<std::string>& pathnames)
 	{
 		return rglob(std::vector<std::string>(pathnames));
-	}
-	std::vector<std::filesystem::path> rglob_path(const std::string& basepath,
-												  const std::initializer_list<std::string>& pathnames)
-	{
-		return rglob_path(basepath, std::vector<std::string>(pathnames));
 	}
 } // namespace glob
 
