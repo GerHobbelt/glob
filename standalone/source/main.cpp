@@ -1,4 +1,4 @@
-#include <glob/glob.h>
+#include <glob/glob.hpp>
 #include <glob/version.h>
 
 #include <cxxopts.hpp>
