@@ -14,6 +14,18 @@ namespace fs = std::filesystem;
 
 namespace glob {
 
+/// Helper struct for extended options
+struct options {
+  fs::path basepath;
+  std::vector<fs::path> pathnames;
+  bool include_hidden_entries = false;
+
+  /// \param basepath the root directory to run in
+  /// \param pathname string containing a path specification
+  /// Convenience constructor for use when only a single pathspec will be used
+  options(const fs::path& basepath, const fs::path& pathname, bool include_hidden_entries = false) : basepath(basepath), pathnames({pathname}), include_hidden_entries(include_hidden_entries) {};
+};
+
 /// \param pathname string containing a path specification
 /// \return vector of paths that match the pathname
 ///
@@ -358,16 +370,16 @@ namespace glob
 		}
 
 		// Recursively yields relative pathnames inside a literal directory.
-		std::vector<fs::path> rlistdir(const fs::path& dirname, bool dironly)
+		std::vector<fs::path> rlistdir(const fs::path& dirname, bool dironly, bool includehidden)
 		{
 			std::vector<fs::path> result;
 			auto names = iter_directory(dirname, dironly);
 			for (auto& x : names)
 			{
-				if (!is_hidden(x.string()))
+				if (includehidden || !is_hidden(x.string()))
 				{
 					result.push_back(x);
-					for (auto& y : rlistdir(x, dironly))
+					for (auto& y : rlistdir(x, dironly, includehidden))
 					{
 						result.push_back(y);
 					}
@@ -378,12 +390,12 @@ namespace glob
 
 		// This helper function recursively yields relative pathnames inside a literal
 		// directory.
-		std::vector<fs::path> glob2(const fs::path& dirname, const fs::path& pattern, bool dironly)
+		std::vector<fs::path> glob2(const fs::path& dirname, const fs::path& pattern, bool dironly, bool includehidden)
 		{
 			// std::cout << "In glob2\n";
 			std::vector<fs::path> result;
 			assert(is_recursive(pattern.string()));
-			for (auto& dir : rlistdir(dirname, dironly))
+			for (auto& dir : rlistdir(dirname, dironly, includehidden))
 			{
 				result.push_back(dir);
 			}
@@ -393,14 +405,14 @@ namespace glob
 		// These 2 helper functions non-recursively glob inside a literal directory.
 		// They return a list of basenames.  _glob1 accepts a pattern while _glob0
 		// takes a literal basename (so it only has to check for its existence).
-		std::vector<fs::path> glob1(const fs::path& dirname, const fs::path& pattern, bool dironly)
+		std::vector<fs::path> glob1(const fs::path& dirname, const fs::path& pattern, bool dironly, bool includehidden)
 		{
 			// std::cout << "In glob1\n";
 			auto names = iter_directory(dirname, dironly);
 			std::vector<fs::path> filtered_names;
 			for (auto& n : names)
 			{
-				if (!is_hidden(n.string()))
+				if (includehidden || !is_hidden(n.string()))
 				{
 					filtered_names.push_back(n.filename());
 					// if (n.is_relative()) {
@@ -415,7 +427,7 @@ namespace glob
 			return filter(filtered_names, pattern.string());
 		}
 
-		std::vector<fs::path> glob0(const fs::path& dirname, const fs::path& basename, bool /*dironly*/)
+		std::vector<fs::path> glob0(const fs::path& dirname, const fs::path& basename, bool /*dironly*/, bool)
 		{
 			// std::cout << "In glob0\n";
 			std::vector<fs::path> result;
@@ -437,7 +449,7 @@ namespace glob
 			return result;
 		}
 
-		std::vector<fs::path> glob(const fs::path& inpath, bool recursive = false, bool dironly = false)
+		std::vector<fs::path> glob(const fs::path& inpath, bool recursive = false, bool dironly = false, bool includehidden = false)
 		{
 			std::vector<fs::path> result;
 
@@ -478,25 +490,25 @@ namespace glob
 			{
 				if (recursive && is_recursive(basename.string()))
 				{
-					return glob2(dirname, basename, dironly);
+					return glob2(dirname, basename, dironly, includehidden);
 				}
 				else
 				{
-					return glob1(dirname, basename, dironly);
+					return glob1(dirname, basename, dironly, includehidden);
 				}
 			}
 
 			std::vector<fs::path> dirs;
 			if (dirname != fs::path(pathname) && has_magic(dirname.string()))
 			{
-				dirs = glob(dirname, recursive, true);
+				dirs = glob(dirname, recursive, true, includehidden);
 			}
 			else
 			{
 				dirs = {dirname};
 			}
 
-			std::function<std::vector<fs::path>(const fs::path&, const fs::path&, bool)> glob_in_dir;
+			std::function<std::vector<fs::path>(const fs::path&, const fs::path&, bool, bool)> glob_in_dir;
 			if (has_magic(basename.string()))
 			{
 				if (recursive && is_recursive(basename.string()))
@@ -515,7 +527,7 @@ namespace glob
 
 			for (auto& d : dirs)
 			{
-				for (auto& name : glob_in_dir(d, basename, dironly))
+				for (auto& name : glob_in_dir(d, basename, dironly, includehidden))
 				{
 					fs::path subresult = name;
 					if (name.parent_path().empty())
