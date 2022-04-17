@@ -74,7 +74,7 @@ std::string translate(const std::string &pattern) {
           chunks.push_back(std::string(pattern.begin() + i, pattern.begin() + j));
           // Escape backslashes and hyphens for set difference (--).
           // Hyphens that create ranges shouldn't be escaped.
-          bool first = false;
+          bool first = true;
           for (auto &s : chunks) {
             string_replace(s, std::string{"\\"}, std::string{R"(\\)"});
             string_replace(s, std::string{"-"}, std::string{R"(\-)"});
@@ -361,20 +361,68 @@ std::vector<fs::path> glob(const std::string &pathname, bool recursive = false,
   return result;
 }
 
+static inline 
+std::vector<fs::path> glob(const std::string& pathname, bool recursive = false,
+	bool dironly = false) {
+	return glob(fs::path(pathname), recursive, dironly);
+}
+
 } // namespace end
 
+
+/// \param pathname string containing a path specification
+/// \return vector of paths that match the pathname
+///
+/// Pathnames can be absolute (/usr/src/Foo/Makefile) or relative (../../Tools/*/*.gif)
+/// Pathnames can contain shell-style wildcards
+/// Broken symlinks are included in the results (as in the shell)
 static inline 
-std::vector<fs::path> glob(const std::string &pathname) {
+std::vector<std::filesystem::path> glob(const std::string &pathname) {
   return glob(pathname, false);
 }
 
+/// \param basepath the root directory to run in
+/// \param pathname string containing a path specification
+/// \return vector of paths that match the pathname
+///
+/// Pathnames can be absolute (/usr/src/Foo/Makefile) or relative (../../Tools/*/*.gif)
+/// Pathnames can contain shell-style wildcards
+/// Broken symlinks are included in the results (as in the shell)
 static inline 
-std::vector<fs::path> rglob(const std::string &pathname) {
+std::vector<std::filesystem::path> glob_path(const std::string& basepath, const std::string& pathname) 
+{
+  return glob(fs::path(basepath) / pathname, false);
+}
+
+/// \param pathnames string containing a path specification
+/// \return vector of paths that match the pathname
+///
+/// Globs recursively.
+/// The pattern “**” will match any files and zero or more directories, subdirectories and
+/// symbolic links to directories.
+static inline 
+std::vector<std::filesystem::path> rglob(const std::string &pathname) {
   return glob(pathname, true);
 }
 
+/// \param basepath the root directory to run in
+/// \param pathnames string containing a path specification
+/// \return vector of paths that match the pathname
+///
+/// Globs recursively.
+/// The pattern “**” will match any files and zero or more directories, subdirectories and
+/// symbolic links to directories.
 static inline 
-std::vector<std::filesystem::path> glob(const std::vector<std::string> &pathnames) {
+std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const std::string& pathname) 
+{
+  return glob(fs::path(basepath) / pathname, true);
+}
+
+
+/// Runs `glob` against each pathname in `pathnames` and accumulates the results
+static inline 
+std::vector<std::filesystem::path> glob(const std::vector<std::string> &pathnames) 
+{
   std::vector<std::filesystem::path> result;
   for (auto &pathname : pathnames) {
     for (auto &match : glob(pathname, false)) {
@@ -384,27 +432,82 @@ std::vector<std::filesystem::path> glob(const std::vector<std::string> &pathname
   return result;
 }
 
+
+/// Runs `glob` against each pathname in `pathnames` and accumulates the results
+static inline 
+std::vector<std::filesystem::path> glob_path(const std::string& basepath, const std::vector<std::string>& pathnames) 
+{
+  std::vector<std::filesystem::path> result;
+  for (auto& pathname : pathnames)
+  {
+	for (auto& match : glob(fs::path(basepath) / pathname, false))
+	{
+	  result.push_back(std::move(match));
+	}
+  }
+  return result;
+}
+
+/// Runs `rglob` against each pathname in `pathnames` and accumulates the results
 static inline 
 std::vector<std::filesystem::path> rglob(const std::vector<std::string> &pathnames) {
   std::vector<std::filesystem::path> result;
-  for (auto &pathname : pathnames) {
-    for (auto &match : glob(pathname, true)) {
+  for (auto &pathname : pathnames) 
+  {
+    for (auto &match : glob(pathname, true)) 
+	{
       result.push_back(std::move(match));
     }
   }
   return result;
 }
 
+/// Runs `rglob` against each pathname in `pathnames` and accumulates the results
 static inline 
-std::vector<std::filesystem::path>
-glob(const std::initializer_list<std::string> &pathnames) {
+std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const std::vector<std::string>& pathnames) 
+{
+  std::vector<std::filesystem::path> result;
+  for (auto &pathname : pathnames) 
+  {
+    for (auto &match : glob(fs::path(basepath) / pathname, true)) 
+	{
+      result.push_back(std::move(match));
+    }
+  }
+  return result;
+}
+
+
+
+/// Initializer list overload for convenience
+static inline 
+std::vector<std::filesystem::path> glob(const std::initializer_list<std::string> &pathnames) 
+{
   return glob(std::vector<std::string>(pathnames));
 }
 
+
+/// Initializer list overload for convenience
 static inline 
-std::vector<std::filesystem::path>
-rglob(const std::initializer_list<std::string> &pathnames) {
+std::vector<std::filesystem::path> glob_path(const std::string& basepath, const std::initializer_list<std::string>& pathnames)
+{
+    return glob_path(basepath, std::vector<std::string>(pathnames));
+}
+
+
+/// Initializer list overload for convenience
+static inline 
+std::vector<std::filesystem::path> rglob(const std::initializer_list<std::string> &pathnames) 
+{
   return rglob(std::vector<std::string>(pathnames));
+}
+
+
+/// Initializer list overload for convenience
+static inline 
+std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const std::initializer_list<std::string>& pathnames)
+{
+    return rglob_path(basepath, std::vector<std::string>(pathnames));
 }
 
 } // namespace glob

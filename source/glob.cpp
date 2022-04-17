@@ -1,10 +1,13 @@
 
 #include <cassert>
+#include <filesystem>
 #include <functional>
 #include <glob/glob.h>
 #include <iostream>
 #include <map>
 #include <regex>
+#include <string>
+#include <vector>
 namespace fs = std::filesystem;
 
 namespace glob {
@@ -84,7 +87,7 @@ std::string translate(const std::string &pattern) {
 
         // Escape set operations (&&, ~~ and ||).
         std::string result;
-        std::regex_replace(std::back_inserter(result),          // ressult
+        std::regex_replace(std::back_inserter(result),          // result
                            stuff.begin(), stuff.end(),          // string
                            std::regex(std::string{R"([&~|])"}), // pattern
                            std::string{R"(\\\1)"});             // repl
@@ -145,8 +148,13 @@ std::vector<fs::path> filter(const std::vector<fs::path> &names,
 
 fs::path expand_tilde(fs::path path) {
   if (path.empty()) return path;
-
+#ifdef _WIN32
+  char* home;
+  size_t sz;
+  errno_t err = _dupenv_s(&home, &sz, "USERPROFILE");
+#else
   const char * home = std::getenv("HOME");
+#endif
   if (home == nullptr) {
     throw std::invalid_argument("error: Unable to expand `~` - HOME environment variable not set.");
   }
@@ -165,7 +173,9 @@ bool has_magic(const std::string &pathname) {
   return std::regex_search(pathname, magic_check);
 }
 
-bool is_hidden(const std::string &pathname) { return pathname[0] == '.'; }
+bool is_hidden(const std::string &pathname) {
+  return std::regex_match(pathname, std::regex("^(.*\\/)*\\.[^\\.\\/]+\\/*$"));
+}
 
 bool is_recursive(const std::string &pattern) { return pattern == "**"; }
 
@@ -190,7 +200,7 @@ std::vector<fs::path> iter_directory(const fs::path &dirname, bool dironly) {
           }
         }
       }
-    } catch (std::exception& e) {
+    } catch (std::exception&) {
       // not a directory
       // do nothing
     }
@@ -412,22 +422,18 @@ std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const
 }
 
 
-std::vector<std::filesystem::path>
-glob(const std::initializer_list<std::string> &pathnames) {
+std::vector<std::filesystem::path> glob(const std::initializer_list<std::string> &pathnames) {
   return glob(std::vector<std::string>(pathnames));
 }
 
-std::vector<std::filesystem::path> glob_path(const std::string& basepath,
-											 const std::initializer_list<std::string>& pathnames)
+std::vector<std::filesystem::path> glob_path(const std::string& basepath, const std::initializer_list<std::string>& pathnames)
 {
     return glob_path(basepath, std::vector<std::string>(pathnames));
 }
-std::vector<std::filesystem::path>
-rglob(const std::initializer_list<std::string> &pathnames) {
+std::vector<std::filesystem::path> rglob(const std::initializer_list<std::string> &pathnames) {
   return rglob(std::vector<std::string>(pathnames));
 }
-std::vector<std::filesystem::path> rglob_path(const std::string& basepath,
-											  const std::initializer_list<std::string>& pathnames)
+std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const std::initializer_list<std::string>& pathnames)
 {
     return rglob_path(basepath, std::vector<std::string>(pathnames));
 }
