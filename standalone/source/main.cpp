@@ -13,13 +13,14 @@ int main(int argc, const char** argv)
 	bool recursive = false;
 	std::vector<std::string> patterns;
 	std::set<std::string> tags;
-
+	std::string basepath;
 	enum class mode { none, help, version, glob };
 	mode selected = mode::none;
 
 	auto options = (
 		option("-r", "--recursive").set(recursive) % "Run glob recursively",
-		repeatable( option("-i", "--input").set(selected, mode::glob) & values("patterns", patterns) ) % "Patterns to match"
+		repeatable( option("-i", "--input").set(selected, mode::glob) & values("patterns", patterns) ) % "Patterns to match",
+		option("-b", "--basepath").set(basepath) % "Base directory to glob in"
 	);
 	auto cli = (
 		(options
@@ -40,6 +41,7 @@ int main(int argc, const char** argv)
 	switch (selected)
 	{
 	default:
+
 	case mode::none:
 	case mode::help:
 		help();
@@ -54,6 +56,7 @@ int main(int argc, const char** argv)
 	}
 
 	if (patterns.empty())
+
 	{
 		help();
 		return EXIT_SUCCESS;
@@ -61,16 +64,36 @@ int main(int argc, const char** argv)
 
 	if (recursive)
 	{
-		for (auto& match : glob::rglob(patterns))
+	    if (!basepath.empty()) 
 		{
-			std::cout << match << "\n";
+	      	for (auto& match : glob::rglob_path(basepath, patterns)) 
+		  	{
+				std::cout << match << "\n";
+			}
+	    } 
+		else 
+		{
+			for (auto& match : glob::rglob(patterns))
+			{
+				std::cout << match << "\n";
+	    	} 
 		}
 	}
 	else
 	{
-		for (auto& match : glob::glob(patterns))
+    	if (!basepath.empty()) 
 		{
-			std::cout << match << "\n";
+     		for (auto& match : glob::glob_path(basepath, patterns)) 
+			{
+        		std::cout << match << "\n";
+			}
+	    } 
+		else 
+		{
+			for (auto& match : glob::glob(patterns))
+			{
+		      	std::cout << match << "\n";
+	      	}
 		}
 	}
 
