@@ -154,21 +154,34 @@ std::vector<fs::path> filter(const std::vector<fs::path> &names,
 static inline 
 fs::path expand_tilde(fs::path path) {
   if (path.empty()) return path;
-#ifdef _WIN32
-  char* home;
-  size_t sz;
-  errno_t err = _dupenv_s(&home, &sz, "USERPROFILE");
-#else
-  const char * home = std::getenv("HOME");
-#endif
-  if (home == nullptr) {
-    throw std::invalid_argument("error: Unable to expand `~` - HOME environment variable not set.");
-  }
 
-  std::string s = path.string();
-  if (s[0] == '~') {
-    s = std::string(home) + s.substr(1, s.size() - 1);
-    return fs::path(s);
+  auto firstdirname = *(path.begin());
+
+  if (path.is_relative() && firstdirname == "~") {
+	  // expand tilde, when it's at the start of the (relative) path.
+#ifdef _WIN32
+	  char* home;
+	  size_t sz;
+	  errno_t err = _dupenv_s(&home, &sz, "USERPROFILE");
+	  if (home == nullptr) {
+		  err = _dupenv_s(&home, &sz, "HOME");
+		  if (home == nullptr) {
+			  throw std::invalid_argument("error: Unable to expand `~` - neither USERPROFILE nor HOME environment variables are set.");
+		  }
+	  }
+#else
+	  const char* home = std::getenv("HOME");
+	  if (home == nullptr) {
+		  throw std::invalid_argument("error: Unable to expand `~` - HOME environment variable not set.");
+	  }
+#endif
+
+	  std::string s = path.string();
+	  s = std::string(home) + s.substr(1, s.size() - 1);
+#ifdef _WIN32
+	  free(home);
+#endif
+	  return fs::path(s).lexically_normal();
   } else {
     return path;
   }
@@ -238,7 +251,7 @@ std::vector<fs::path> rlistdir(const fs::path &dirname, bool dironly) {
 // This helper function recursively yields relative pathnames inside a literal
 // directory.
 static inline 
-std::vector<fs::path> glob2(const fs::path &dirname, const std::string &pattern,
+std::vector<fs::path> glob2(const fs::path &dirname, const fs::path& pattern,
                             bool dironly) {
   // std::cout << "In glob2\n";
   std::vector<fs::path> result;
@@ -253,7 +266,7 @@ std::vector<fs::path> glob2(const fs::path &dirname, const std::string &pattern,
 // They return a list of basenames.  _glob1 accepts a pattern while _glob0
 // takes a literal basename (so it only has to check for its existence).
 static inline 
-std::vector<fs::path> glob1(const fs::path &dirname, const std::string &pattern,
+std::vector<fs::path> glob1(const fs::path &dirname, const fs::path &pattern,
                             bool dironly) {
   // std::cout << "In glob1\n";
   auto names = iter_directory(dirname, dironly);
@@ -292,19 +305,17 @@ std::vector<fs::path> glob0(const fs::path &dirname, const fs::path &basename,
 }
 
 static inline 
-std::vector<fs::path> glob(const std::string &pathname, bool recursive = false,
+std::vector<fs::path> glob(const fs::path &pathspec, bool recursive = false,
                            bool dironly = false) {
   std::vector<fs::path> result;
 
-  auto path = fs::path(pathname);
+  fs::path path = pathspec;
 
-  if (pathname[0] == '~') {
-    // expand tilde
-    path = expand_tilde(path);
-  }
+  path = expand_tilde(path);
 
   auto dirname = path.parent_path();
   const auto basename = path.filename();
+  auto pathname = path.string();
 
   if (!has_magic(pathname)) {
     assert(!dironly);
@@ -323,20 +334,20 @@ std::vector<fs::path> glob(const std::string &pathname, bool recursive = false,
 
   if (dirname.empty()) {
     if (recursive && is_recursive(basename.string())) {
-      return glob2(dirname, basename.string(), dironly);
+      return glob2(dirname, basename, dironly);
     } else {
-      return glob1(dirname, basename.string(), dironly);
+      return glob1(dirname, basename, dironly);
     }
   }
 
   std::vector<fs::path> dirs;
   if (dirname != fs::path(pathname) && has_magic(dirname.string())) {
-    dirs = glob(dirname.string(), recursive, true);
+    dirs = glob(dirname, recursive, true);
   } else {
     dirs = {dirname};
   }
 
-  std::function<std::vector<fs::path>(const fs::path &, const std::string &, bool)>
+  std::function<std::vector<fs::path>(const fs::path &, const fs::path &, bool)>
       glob_in_dir;
   if (has_magic(basename.string())) {
     if (recursive && is_recursive(basename.string())) {
@@ -349,7 +360,7 @@ std::vector<fs::path> glob(const std::string &pathname, bool recursive = false,
   }
 
   for (auto &d : dirs) {
-    for (auto &name : glob_in_dir(d, basename.string(), dironly)) {
+    for (auto &name : glob_in_dir(d, basename, dironly)) {
       fs::path subresult = name;
       if (name.parent_path().empty()) {
         subresult = d / name;
@@ -452,10 +463,8 @@ std::vector<std::filesystem::path> glob_path(const std::string& basepath, const 
 static inline 
 std::vector<std::filesystem::path> rglob(const std::vector<std::string> &pathnames) {
   std::vector<std::filesystem::path> result;
-  for (auto &pathname : pathnames) 
-  {
-    for (auto &match : glob(pathname, true)) 
-	{
+  for (auto &pathname : pathnames) {
+    for (auto &match : glob(pathname, true)) {
       result.push_back(std::move(match));
     }
   }
@@ -467,10 +476,8 @@ static inline
 std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const std::vector<std::string>& pathnames) 
 {
   std::vector<std::filesystem::path> result;
-  for (auto &pathname : pathnames) 
-  {
-    for (auto &match : glob(fs::path(basepath) / pathname, true)) 
-	{
+  for (auto &pathname : pathnames) {
+    for (auto &match : glob(fs::path(basepath) / pathname, true)) {
       result.push_back(std::move(match));
     }
   }
@@ -508,6 +515,15 @@ static inline
 std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const std::initializer_list<std::string>& pathnames)
 {
     return rglob_path(basepath, std::vector<std::string>(pathnames));
+}
+
+
+/// Helper function: expand '~' HOME part (when used in the path) and normalize the given path.
+static inline 
+std::filesystem::path expand_and_normalize_tilde(std::filesystem::path path) 
+{
+	path = expand_tilde(path);
+	return path.lexically_normal();
 }
 
 } // namespace glob

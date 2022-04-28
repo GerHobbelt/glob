@@ -148,21 +148,34 @@ std::vector<fs::path> filter(const std::vector<fs::path> &names,
 
 fs::path expand_tilde(fs::path path) {
   if (path.empty()) return path;
-#ifdef _WIN32
-  char* home;
-  size_t sz;
-  errno_t err = _dupenv_s(&home, &sz, "USERPROFILE");
-#else
-  const char * home = std::getenv("HOME");
-#endif
-  if (home == nullptr) {
-    throw std::invalid_argument("error: Unable to expand `~` - HOME environment variable not set.");
-  }
 
-  std::string s = path.string();
-  if (s[0] == '~') {
-    s = std::string(home) + s.substr(1, s.size() - 1);
-    return fs::path(s);
+  auto firstdirname = *(path.begin());
+
+  if (path.is_relative() && firstdirname == "~") {
+	  // expand tilde, when it's at the start of the (relative) path.
+#ifdef _WIN32
+	  char* home;
+	  size_t sz;
+	  errno_t err = _dupenv_s(&home, &sz, "USERPROFILE");
+	  if (home == nullptr) {
+		  err = _dupenv_s(&home, &sz, "HOME");
+		  if (home == nullptr) {
+			  throw std::invalid_argument("error: Unable to expand `~` - neither USERPROFILE nor HOME environment variables are set.");
+		  }
+	  }
+#else
+	  const char* home = std::getenv("HOME");
+	  if (home == nullptr) {
+		  throw std::invalid_argument("error: Unable to expand `~` - HOME environment variable not set.");
+	  }
+#endif
+
+	  std::string s = path.string();
+	  s = std::string(home) + s.substr(1, s.size() - 1);
+#ifdef _WIN32
+	  free(home);
+#endif
+	  return fs::path(s).lexically_normal();
   } else {
     return path;
   }
@@ -283,15 +296,12 @@ std::vector<fs::path> glob(const fs::path &pathspec, bool recursive = false,
   std::vector<fs::path> result;
 
   fs::path path = pathspec;
-  auto pathname = path.string();
 
-  if (pathname[0] == '~') {
-    // expand tilde
-    path = expand_tilde(path);
-  }
+  path = expand_tilde(path);
 
   auto dirname = path.parent_path();
   const auto basename = path.filename();
+  auto pathname = path.string();
 
   if (!has_magic(pathname)) {
     assert(!dironly);
@@ -359,8 +369,7 @@ std::vector<fs::path> glob(const std::string &pathname) {
   return glob(pathname, false);
 }
 
-std::vector<std::filesystem::path> glob_path(const std::string& basepath, const std::string& pathname) 
-{
+std::vector<std::filesystem::path> glob_path(const std::string& basepath, const std::string& pathname) {
   return glob(fs::path(basepath) / pathname, false);
 }
 
@@ -370,8 +379,7 @@ std::vector<fs::path> rglob(const std::string &pathname) {
   return glob(pathname, true);
 }
 
-std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const std::string& pathname) 
-{
+std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const std::string& pathname) {
   return glob(fs::path(basepath) / pathname, true);
 }
 
@@ -387,8 +395,7 @@ std::vector<std::filesystem::path> glob(const std::vector<std::string> &pathname
   return result;
 }
 
-std::vector<std::filesystem::path> glob_path(const std::string& basepath, const std::vector<std::string>& pathnames) 
-{
+std::vector<std::filesystem::path> glob_path(const std::string& basepath, const std::vector<std::string>& pathnames) {
   std::vector<std::filesystem::path> result;
   for (auto& pathname : pathnames)
   {
@@ -410,8 +417,7 @@ std::vector<std::filesystem::path> rglob(const std::vector<std::string> &pathnam
   }
   return result;
 }
-std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const std::vector<std::string>& pathnames) 
-{
+std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const std::vector<std::string>& pathnames) {
   std::vector<std::filesystem::path> result;
   for (auto &pathname : pathnames) {
     for (auto &match : glob(fs::path(basepath) / pathname, true)) {
@@ -426,15 +432,21 @@ std::vector<std::filesystem::path> glob(const std::initializer_list<std::string>
   return glob(std::vector<std::string>(pathnames));
 }
 
-std::vector<std::filesystem::path> glob_path(const std::string& basepath, const std::initializer_list<std::string>& pathnames)
-{
+std::vector<std::filesystem::path> glob_path(const std::string& basepath, const std::initializer_list<std::string>& pathnames) {
     return glob_path(basepath, std::vector<std::string>(pathnames));
 }
 std::vector<std::filesystem::path> rglob(const std::initializer_list<std::string> &pathnames) {
   return rglob(std::vector<std::string>(pathnames));
 }
-std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const std::initializer_list<std::string>& pathnames)
-{
+std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const std::initializer_list<std::string>& pathnames) {
     return rglob_path(basepath, std::vector<std::string>(pathnames));
 }
+
+
+/// Helper function: expand '~' HOME part (when used in the path) and normalize the given path.
+std::filesystem::path expand_and_normalize_tilde(std::filesystem::path path) {
+	path = expand_tilde(path);
+	return path.lexically_normal();
+}
+
 } // namespace glob

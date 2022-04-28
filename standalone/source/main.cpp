@@ -1,4 +1,4 @@
-#include <glob/glob.h>
+﻿#include <glob/glob.h>
 #include <glob/version.h>
 
 #include <clipp.h>
@@ -6,9 +6,44 @@
 #include <string>
 #include <set>
 
+#include <iostream>
+#include <filesystem>
+
+namespace fs = std::filesystem;
+
+static void test()
+{
+	std::vector<fs::path> testpaths{
+		"C:\\users\\abcdef\\AppData\\Local\\Temp\\",
+		"/home/user/.config/Cppcheck/Cppcheck-GUI.conf",
+		"~/a/b/.config/Cppcheck/Cppcheck-GUI.conf",
+		"~mcFarlane/.config/Cppcheck/Cppcheck-GUI.conf",
+		"base/~mcFarlane/.config/Cppcheck/Cppcheck-GUI.conf",
+		"Cppcheck/Cppcheck-GUI.conf",
+		"../../Cppcheck/Cppcheck-GUI.conf",
+		"..\\..\\Cppcheck\\Cppcheck-GUI.conf",
+		"Z:\\Cppcheck\\Cppcheck-GUI.conf",
+		"\\\\?:\\Cppcheck\\Cppcheck-GUI.conf",
+		"./Cppcheck/Cppcheck-GUI.conf",
+		"Cppcheck-GUI.conf",
+		"./Cppcheck-GUI.conf"
+	};
+
+	for (const auto& p : testpaths) {
+		std::cout << "Examining the path " << p << " through iterators gives\n";
+		std::cout << p.root_directory() << " |RN " << p.root_name() << " |RP " << p.root_path() << " |PP " << p.parent_path() << " |FN " << p.filename() << " |EX " << p.extension() << " |ST " << p.stem() << " |0 " << *(p.begin()) << " |1 " << *(++p.begin()) << " ||\n";
+		for (auto it = p.begin(); it != p.end(); ++it) {
+			std::cout << *it << " | ";
+		}
+		std::cout << '\n';
+	}
+}
+
 int main(int argc, const char** argv)
 {
 	using namespace clipp;
+
+	test();
 
 	bool recursive = false;
 	std::vector<std::string> patterns;
@@ -56,7 +91,6 @@ int main(int argc, const char** argv)
 	}
 
 	if (patterns.empty())
-
 	{
 		help();
 		return EXIT_SUCCESS;

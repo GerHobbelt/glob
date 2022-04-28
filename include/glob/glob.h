@@ -67,4 +67,7 @@ std::vector<std::filesystem::path> rglob(const std::initializer_list<std::string
 /// Initializer list overload for convenience
 std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const std::initializer_list<std::string>& pathnames);
 
+/// Helper function: expand '~' HOME part (when used in the path) and normalize the given path.
+std::filesystem::path expand_and_normalize_tilde(std::filesystem::path path);
+
 } // namespace glob
