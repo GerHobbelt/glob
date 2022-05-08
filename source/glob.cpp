@@ -190,7 +190,7 @@ bool is_hidden(const std::string &pathname) {
   return std::regex_match(pathname, std::regex("^(.*\\/)*\\.[^\\.\\/]+\\/*$"));
 }
 
-bool is_recursive(const std::string &pattern) { return pattern == "**"; }
+bool is_recursive(const std::string& pattern) { return pattern == "**"; }
 
 std::vector<fs::path> iter_directory(const fs::path &dirname, bool dironly) {
   std::vector<fs::path> result;
@@ -239,11 +239,11 @@ std::vector<fs::path> rlistdir(const fs::path &dirname, bool dironly) {
 
 // This helper function recursively yields relative pathnames inside a literal
 // directory.
-std::vector<fs::path> glob2(const fs::path &dirname, const fs::path& pattern,
+std::vector<fs::path> glob2(const fs::path &dirname, const std::string& pattern,
                             bool dironly) {
   // std::cout << "In glob2\n";
   std::vector<fs::path> result;
-  assert(is_recursive(pattern.string()));
+  assert(is_recursive(pattern));
   for (auto &dir : rlistdir(dirname, dironly)) {
     result.push_back(dir);
   }
@@ -254,7 +254,7 @@ std::vector<fs::path> glob2(const fs::path &dirname, const fs::path& pattern,
 // They return a list of basenames.  _glob1 accepts a pattern while _glob0
 // takes a literal basename (so it only has to check for its existence).
 
-std::vector<fs::path> glob1(const fs::path &dirname, const fs::path &pattern,
+std::vector<fs::path> glob1(const fs::path &dirname, const std::string& pattern,
                             bool dironly) {
   // std::cout << "In glob1\n";
   auto names = iter_directory(dirname, dironly);
@@ -271,7 +271,7 @@ std::vector<fs::path> glob1(const fs::path &dirname, const fs::path &pattern,
       // }
     }
   }
-  return filter(filtered_names, pattern.string());
+  return filter(filtered_names, pattern);
 }
 
 std::vector<fs::path> glob0(const fs::path &dirname, const fs::path &basename,
@@ -300,7 +300,7 @@ std::vector<fs::path> glob(const fs::path &pathspec, bool recursive = false,
   path = expand_tilde(path);
 
   auto dirname = path.parent_path();
-  const auto basename = path.filename();
+  const auto basename = path.filename().string();
   auto pathname = path.string();
 
   if (!has_magic(pathname)) {
@@ -319,7 +319,7 @@ std::vector<fs::path> glob(const fs::path &pathspec, bool recursive = false,
   }
 
   if (dirname.empty()) {
-    if (recursive && is_recursive(basename.string())) {
+    if (recursive && is_recursive(basename)) {
       return glob2(dirname, basename, dironly);
     } else {
       return glob1(dirname, basename, dironly);
@@ -333,10 +333,11 @@ std::vector<fs::path> glob(const fs::path &pathspec, bool recursive = false,
     dirs = {dirname};
   }
 
-  std::function<std::vector<fs::path>(const fs::path &, const fs::path &, bool)>
-      glob_in_dir;
-  if (has_magic(basename.string())) {
-    if (recursive && is_recursive(basename.string())) {
+  typedef std::vector<fs::path> globfunc_t(const fs::path& dirname, const std::string& pattern, bool dironly);
+
+  std::function<globfunc_t> glob_in_dir;
+  if (has_magic(basename)) {
+    if (recursive && is_recursive(basename)) {
       glob_in_dir = glob2;
     } else {
       glob_in_dir = glob1;
@@ -365,26 +366,51 @@ std::vector<fs::path> glob(const std::string& pathname, bool recursive = false,
 
 } // namespace end
 
-std::vector<fs::path> glob(const std::string &pathname) {
+
+/// \param pathname string containing a path specification
+/// \return vector of paths that match the pathname
+///
+/// Pathnames can be absolute (/usr/src/Foo/Makefile) or relative (../../Tools/*/*.gif)
+/// Pathnames can contain shell-style wildcards
+/// Broken symlinks are included in the results (as in the shell)
+std::vector<std::filesystem::path> glob(const std::string &pathname) {
   return glob(pathname, false);
 }
 
+/// \param basepath the root directory to run in
+/// \param pathname string containing a path specification
+/// \return vector of paths that match the pathname
+///
+/// Pathnames can be absolute (/usr/src/Foo/Makefile) or relative (../../Tools/*/*.gif)
+/// Pathnames can contain shell-style wildcards
+/// Broken symlinks are included in the results (as in the shell)
 std::vector<std::filesystem::path> glob_path(const std::string& basepath, const std::string& pathname) {
   return glob(fs::path(basepath) / pathname, false);
 }
 
-
-
-std::vector<fs::path> rglob(const std::string &pathname) {
+/// \param pathnames string containing a path specification
+/// \return vector of paths that match the pathname
+///
+/// Globs recursively.
+/// The pattern “**” will match any files and zero or more directories, subdirectories and
+/// symbolic links to directories.
+std::vector<std::filesystem::path> rglob(const std::string &pathname) {
   return glob(pathname, true);
 }
 
+/// \param basepath the root directory to run in
+/// \param pathnames string containing a path specification
+/// \return vector of paths that match the pathname
+///
+/// Globs recursively.
+/// The pattern “**” will match any files and zero or more directories, subdirectories and
+/// symbolic links to directories.
 std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const std::string& pathname) {
   return glob(fs::path(basepath) / pathname, true);
 }
 
 
-
+/// Runs `glob` against each pathname in `pathnames` and accumulates the results
 std::vector<std::filesystem::path> glob(const std::vector<std::string> &pathnames) {
   std::vector<std::filesystem::path> result;
   for (auto &pathname : pathnames) {
@@ -395,6 +421,7 @@ std::vector<std::filesystem::path> glob(const std::vector<std::string> &pathname
   return result;
 }
 
+/// Runs `glob` against each pathname in `pathnames` and accumulates the results
 std::vector<std::filesystem::path> glob_path(const std::string& basepath, const std::vector<std::string>& pathnames) {
   std::vector<std::filesystem::path> result;
   for (auto& pathname : pathnames)
@@ -407,7 +434,7 @@ std::vector<std::filesystem::path> glob_path(const std::string& basepath, const 
   return result;
 }
 
-
+/// Runs `rglob` against each pathname in `pathnames` and accumulates the results
 std::vector<std::filesystem::path> rglob(const std::vector<std::string> &pathnames) {
   std::vector<std::filesystem::path> result;
   for (auto &pathname : pathnames) {
@@ -417,6 +444,8 @@ std::vector<std::filesystem::path> rglob(const std::vector<std::string> &pathnam
   }
   return result;
 }
+
+/// Runs `rglob` against each pathname in `pathnames` and accumulates the results
 std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const std::vector<std::string>& pathnames) {
   std::vector<std::filesystem::path> result;
   for (auto &pathname : pathnames) {
@@ -428,16 +457,26 @@ std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const
 }
 
 
+
+/// Initializer list overload for convenience
 std::vector<std::filesystem::path> glob(const std::initializer_list<std::string> &pathnames) {
   return glob(std::vector<std::string>(pathnames));
 }
 
+
+/// Initializer list overload for convenience
 std::vector<std::filesystem::path> glob_path(const std::string& basepath, const std::initializer_list<std::string>& pathnames) {
     return glob_path(basepath, std::vector<std::string>(pathnames));
 }
+
+
+/// Initializer list overload for convenience
 std::vector<std::filesystem::path> rglob(const std::initializer_list<std::string> &pathnames) {
   return rglob(std::vector<std::string>(pathnames));
 }
+
+
+/// Initializer list overload for convenience
 std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const std::initializer_list<std::string>& pathnames) {
     return rglob_path(basepath, std::vector<std::string>(pathnames));
 }
