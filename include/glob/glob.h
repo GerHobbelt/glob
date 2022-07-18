@@ -70,4 +70,7 @@ std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const
 /// Helper function: expand '~' HOME part (when used in the path) and normalize the given path.
 std::filesystem::path expand_and_normalize_tilde(std::filesystem::path path);
 
+/// Returns true if the input path matches the glob pattern
+bool fnmatch(const std::filesystem::path &name, const std::string &pattern);
+
 } // namespace glob

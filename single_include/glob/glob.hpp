@@ -111,9 +111,9 @@ std::string translate(const std::string &pattern) {
       static std::string special_characters = "()[]{}?*+-|^$\\.&~# \t\n\r\v\f";
       static std::map<int, std::string> special_characters_map;
       if (special_characters_map.empty()) {
-        for (auto &c : special_characters) {
+        for (auto &sc : special_characters) {
           special_characters_map.insert(
-              std::make_pair(static_cast<int>(c), std::string{"\\"} + std::string(1, c)));
+              std::make_pair(static_cast<int>(sc), std::string{"\\"} + std::string(1, sc)));
         }
       }
 
@@ -133,7 +133,7 @@ std::regex compile_pattern(const std::string &pattern) {
 }
 
 static inline 
-bool fnmatch_case(const fs::path &name, const std::string &pattern) {
+bool fnmatch(const fs::path &name, const std::string &pattern) {
   return std::regex_match(name.string(), compile_pattern(pattern));
 }
 
@@ -144,7 +144,7 @@ std::vector<fs::path> filter(const std::vector<fs::path> &names,
   std::vector<fs::path> result;
   for (auto &name : names) {
     // std::cout << "Checking for " << name.string() << "\n";
-    if (fnmatch_case(name, pattern)) {
+    if (fnmatch(name, pattern)) {
       result.push_back(name);
     }
   }
@@ -251,7 +251,7 @@ std::vector<fs::path> rlistdir(const fs::path &dirname, bool dironly) {
 // This helper function recursively yields relative pathnames inside a literal
 // directory.
 static inline 
-std::vector<fs::path> glob2(const fs::path &dirname, const fs::path& pattern,
+std::vector<fs::path> glob2(const fs::path &dirname, [[maybe_unused]] const fs::path& pattern,
                             bool dironly) {
   // std::cout << "In glob2\n";
   std::vector<fs::path> result;
