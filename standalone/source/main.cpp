@@ -11,7 +11,7 @@
 
 namespace fs = std::filesystem;
 
-static void test()
+static int test()
 {
 	std::vector<fs::path> testpaths{
 		"C:\\users\\abcdef\\AppData\\Local\\Temp\\",
@@ -37,19 +37,19 @@ static void test()
 		}
 		std::cout << '\n';
 	}
+
+	return EXIT_SUCCESS;
 }
 
 int main(int argc, const char** argv)
 {
 	using namespace clipp;
 
-	test();
-
 	bool recursive = false;
 	std::vector<std::string> patterns;
 	std::set<std::string> tags;
 	std::string basepath;
-	enum class mode { none, help, version, glob };
+	enum class mode { none, help, version, glob, test };
 	mode selected = mode::none;
 
 	auto options = (
@@ -60,6 +60,7 @@ int main(int argc, const char** argv)
 	auto cli = (
 		(options
 		| command("-h", "--help").set(selected, mode::help) % "Show this screen."
+		| command("-t", "--test").set(selected, mode::test) % "Run the glob system tests."
 		| command("-v", "--version").set(selected, mode::version) % "Show version."
 		),
 		any_other(patterns).set(selected, mode::glob)
@@ -81,6 +82,9 @@ int main(int argc, const char** argv)
 	case mode::help:
 		help();
 		return EXIT_SUCCESS;
+
+	case mode::test:
+		return test();
 
 	case mode::version:
 		std::cout << "glob, version " << GLOB_VERSION << std::endl;

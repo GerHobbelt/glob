@@ -225,6 +225,7 @@ std::vector<fs::path> iter_directory(const fs::path &dirname, bool dironly) {
 // Recursively yields relative pathnames inside a literal directory.
 std::vector<fs::path> rlistdir(const fs::path &dirname, bool dironly) {
   std::vector<fs::path> result;
+  //std::cout << "rlistdir: " << dirname.string() << "\n";
   auto names = iter_directory(dirname, dironly);
   for (auto &x : names) {
     if (!is_hidden(x.string())) {

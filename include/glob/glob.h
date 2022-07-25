@@ -47,12 +47,12 @@ std::vector<std::filesystem::path> glob(const std::vector<std::string> &pathname
 /// Runs `glob` against each pathname in `pathnames` and accumulates the results
 std::vector<std::filesystem::path> glob_path(const std::string& basepath, const std::vector<std::string> &pathnames);
 
-
 /// Runs `rglob` against each pathname in `pathnames` and accumulates the results
 std::vector<std::filesystem::path> rglob(const std::vector<std::string> &pathnames);
 
 /// Runs `rglob` against each pathname in `pathnames` and accumulates the results
 std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const std::vector<std::string>& pathnames);
+
 
 /// Initializer list overload for convenience
 std::vector<std::filesystem::path> glob(const std::initializer_list<std::string> &pathnames);
@@ -60,12 +60,12 @@ std::vector<std::filesystem::path> glob(const std::initializer_list<std::string>
 /// Initializer list overload for convenience
 std::vector<std::filesystem::path> glob_path(const std::string& basepath, const std::initializer_list<std::string>& pathnames);
 
-
 /// Initializer list overload for convenience
 std::vector<std::filesystem::path> rglob(const std::initializer_list<std::string> &pathnames);
 
 /// Initializer list overload for convenience
 std::vector<std::filesystem::path> rglob_path(const std::string& basepath, const std::initializer_list<std::string>& pathnames);
+
 
 /// Helper function: expand '~' HOME part (when used in the path) and normalize the given path.
 std::filesystem::path expand_and_normalize_tilde(std::filesystem::path path);
