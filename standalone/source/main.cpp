@@ -5,8 +5,6 @@
 #include <iostream>
 #include <string>
 #include <set>
-
-#include <iostream>
 #include <filesystem>
 
 namespace fs = std::filesystem;
@@ -40,6 +38,11 @@ static int test()
 
 	return EXIT_SUCCESS;
 }
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main     glob_standalone_main
+#endif
 
 int main(int argc, const char** argv)
 {
