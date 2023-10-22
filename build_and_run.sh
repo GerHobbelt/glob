@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
-cmake -Hall -Bbuild
-cmake --build build
+#
+# Uses build directory ./b/
+#
+cmake -Hall -Bb
+cmake --build b
 ./build/standalone/glob --help
