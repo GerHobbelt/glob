@@ -59,7 +59,7 @@ int main(int argc, const char** argv)
 
 	auto options = (
 		option("-r", "--recursive").set(recursive) % "Run glob recursively",
-		repeatable( option("-i", "--input").set(selected, mode::glob) & values("patterns", patterns) ) % "Patterns to match",
+		repeatable(option("-i", "--input").set(selected, mode::glob) & values("patterns", patterns)) % "Patterns to match",
 		option("-b", "--basepath").set(basepath) % "Base directory to glob in"
 	);
 	auto cli = (
@@ -105,39 +105,47 @@ int main(int argc, const char** argv)
 		return EXIT_SUCCESS;
 	}
 
-	if (recursive)
+	try
 	{
-	    if (!basepath.empty()) 
+		if (recursive)
 		{
-	      	for (auto& match : glob::rglob_path(basepath, patterns)) 
-		  	{
-				std::cout << match << "\n";
-			}
-	    } 
-		else 
-		{
-			for (auto& match : glob::rglob(patterns))
+			if (!basepath.empty())
 			{
-				std::cout << match << "\n";
-	    	} 
+				for (auto& match : glob::rglob_path(basepath, patterns))
+				{
+					std::cout << match << "\n";
+				}
+			} 
+			else
+			{
+				for (auto& match : glob::rglob(patterns))
+				{
+					std::cout << match << "\n";
+				}
+			}
+		} 
+		else
+		{
+			if (!basepath.empty())
+			{
+				for (auto& match : glob::glob_path(basepath, patterns))
+				{
+					std::cout << match << "\n";
+				}
+			} 
+			else
+			{
+				for (auto& match : glob::glob(patterns))
+				{
+					std::cout << match << "\n";
+				}
+			}
 		}
 	}
-	else
+	catch (fs::filesystem_error &ex)
 	{
-    	if (!basepath.empty()) 
-		{
-     		for (auto& match : glob::glob_path(basepath, patterns)) 
-			{
-        		std::cout << match << "\n";
-			}
-	    } 
-		else 
-		{
-			for (auto& match : glob::glob(patterns))
-			{
-		      	std::cout << match << "\n";
-	      	}
-		}
+		std::cerr << "glob/filesystem error " << ex.code().value() << ": " << ex.code().message() << " :: " << ex.what() << " (path: '" << ex.path1().string() << "')" << std::endl;
+		return EXIT_FAILURE;
 	}
 
 	return EXIT_SUCCESS;
