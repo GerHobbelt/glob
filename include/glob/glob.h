@@ -4,22 +4,35 @@
 #include <vector>
 
 #if !defined(GLOB_USE_GHC_FILESYSTEM)
-#if __has_include(<filesystem>) && !defined(GHC_DO_NOT_USE_STD_FS)
-#undef GLOB_USE_GHC_FILESYSTEM
-#else
+#if !__has_include(<filesystem>) || defined(GHC_DO_NOT_USE_STD_FS)
 #define GLOB_USE_GHC_FILESYSTEM   1
+#ifndef GHC_DO_NOT_USE_STD_FS
+#define GHC_DO_NOT_USE_STD_FS     1
 #endif
+#endif
+#else
+#define GHC_DO_NOT_USE_STD_FS     1
 #endif
 
-#ifdef GLOB_USE_GHC_FILESYSTEM
+// to prevent mishaps, use the GHC-provided filesystem selector headerfile: ghc/fs_std.hpp
+// which listens to both system availability of std::filesystem and the GHC_DO_NOT_USE_STD_FS
+// overriding switch/define.
+#if 0
+
 #include <ghc/filesystem.hpp>
-#else
+#if __has_include(<filesystem>)
 #include <filesystem>
+#endif
+
+#else
+
+#include <ghc/fs_std.hpp>  // namespace fs = std::filesystem;   or   namespace fs = ghc::filesystem;
+
 #endif
 
 namespace glob {
 
-#ifdef GLOB_USE_GHC_FILESYSTEM
+#if defined(GHC_USE_GHC_FS)
 namespace fs = ghc::filesystem;
 #else
 namespace fs = std::filesystem;
