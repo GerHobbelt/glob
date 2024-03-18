@@ -5,9 +5,11 @@
 #include <iostream>
 #include <string>
 #include <set>
-#include <filesystem>
 
-namespace fs = std::filesystem;
+#include <ghc/fs_std.hpp>  // namespace fs = std::filesystem;   or   namespace fs = ghc::filesystem;
+
+#include "monolithic_examples.h"
+
 
 static int test()
 {
