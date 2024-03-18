@@ -3,6 +3,14 @@
 #include <string>
 #include <vector>
 
+#if !defined(GLOB_USE_GHC_FILESYSTEM)
+#if __has_include(<filesystem>) && !defined(GHC_DO_NOT_USE_STD_FS)
+#undef GLOB_USE_GHC_FILESYSTEM
+#else
+#define GLOB_USE_GHC_FILESYSTEM   1
+#endif
+#endif
+
 #ifdef GLOB_USE_GHC_FILESYSTEM
 #include <ghc/filesystem.hpp>
 #else
