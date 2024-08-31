@@ -139,7 +139,10 @@ std::vector<fs::path> filter(const std::vector<fs::path> &names,
   std::vector<fs::path> result;
   std::copy_if(std::make_move_iterator(names.begin()), std::make_move_iterator(names.end()),
                std::back_inserter(result),
-               [&pattern_re](const fs::path& name) { return fnmatch(name.string(), pattern_re); });
+               [&pattern_re](const fs::path& name) { 
+                  // std::cout << "Checking for " << name.string() << "\n";
+			      return fnmatch(name.string(), pattern_re); 
+			   });
   return result;
 }
 
@@ -182,9 +185,14 @@ bool has_magic(const std::string &pathname) {
   return std::regex_search(pathname, magic_check);
 }
 
-constexpr bool is_hidden(std::string_view pathname) noexcept { return pathname[0] == '.'; }
+constexpr bool is_hidden(std::string_view pathname) noexcept {
+    //return std::regex_match(pathname, std::regex("^(.*\\/)*\\.[^\\.\\/]+\\/*$"));
+	return pathname[0] == '.';
+}
 
-constexpr bool is_recursive(std::string_view pattern) noexcept { return pattern == std::string_view{"**"}; }
+constexpr bool is_recursive(std::string_view pattern) noexcept {
+	return pattern == std::string_view{"**"};
+}
 
 std::vector<fs::path> iter_directory(const fs::path &dirname, bool dironly) {
   std::vector<fs::path> result;

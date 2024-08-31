@@ -1,12 +1,12 @@
 
 #pragma once
 #include <cassert>
-#include <functional>
+#include <algorithm>
 #include <iostream>
 #include <map>
 #include <regex>
 #include <string>
-#include <vector>
+#include <string_view>
 
 #ifdef GLOB_USE_GHC_FILESYSTEM
 #include <ghc/filesystem.hpp>
@@ -24,8 +24,12 @@ namespace fs = std::filesystem;
 
 namespace {
 
+static constexpr auto SPECIAL_CHARACTERS = std::string_view{"()[]{}?*+-|^$\\.&~# \t\n\r\v\f"};
+static const auto ESCAPE_SET_OPER = std::regex(std::string{R"([&~|])"});
+static const auto ESCAPE_REPL_STR = std::string{R"(\\\1)"};
+
 static inline 
-bool string_replace(std::string &str, const std::string &from, const std::string &to) {
+bool string_replace(std::string &str, std::string_view from, std::string_view to) {
   std::size_t start_pos = str.find(from);
   if (start_pos == std::string::npos)
     return false;
@@ -34,7 +38,7 @@ bool string_replace(std::string &str, const std::string &from, const std::string
 }
 
 static inline 
-std::string translate(const std::string &pattern) {
+std::string translate(std::string_view pattern) {
   std::size_t i = 0, n = pattern.size();
   std::string result_string;
 
@@ -61,7 +65,7 @@ std::string translate(const std::string &pattern) {
       } else {
         auto stuff = std::string(pattern.begin() + i, pattern.begin() + j);
         if (stuff.find("--") == std::string::npos) {
-          string_replace(stuff, std::string{"\\"}, std::string{R"(\\)"});
+          string_replace(stuff, std::string_view{"\\"}, std::string_view{R"(\\)"});
         } else {
           std::vector<std::string> chunks;
           std::size_t k = 0;
@@ -73,7 +77,7 @@ std::string translate(const std::string &pattern) {
 
           while (true) {
             k = pattern.find("-", k, j);
-            if (k == std::string::npos) {
+            if (k == std::string_view::npos) {
               break;
             }
             chunks.push_back(std::string(pattern.begin() + i, pattern.begin() + k));
@@ -85,24 +89,24 @@ std::string translate(const std::string &pattern) {
           // Escape backslashes and hyphens for set difference (--).
           // Hyphens that create ranges shouldn't be escaped.
           bool first = true;
-          for (auto &s : chunks) {
-            string_replace(s, std::string{"\\"}, std::string{R"(\\)"});
-            string_replace(s, std::string{"-"}, std::string{R"(\-)"});
+          for (auto &chunk : chunks) {
+            string_replace(chunk, std::string_view{"\\"}, std::string_view{R"(\\)"});
+            string_replace(chunk, std::string_view{"-"}, std::string_view{R"(\-)"});
             if (first) {
-              stuff += s;
+              stuff += chunk;
               first = false;
             } else {
-              stuff += "-" + s;
+              stuff += "-" + chunk;
             }
           }
         }
 
         // Escape set operations (&&, ~~ and ||).
-        std::string result;
-        std::regex_replace(std::back_inserter(result),          // result
-                           stuff.begin(), stuff.end(),          // string
-                           std::regex(std::string{R"([&~|])"}), // pattern
-                           std::string{R"(\\\1)"});             // repl
+        std::string result{};
+        std::regex_replace(std::back_inserter(result), // result
+                           stuff.begin(), stuff.end(), // string
+                           ESCAPE_SET_OPER,            // pattern
+                           ESCAPE_REPL_STR);           // repl
         stuff = result;
         i = j + 1;
         if (stuff[0] == '!') {
@@ -118,16 +122,14 @@ std::string translate(const std::string &pattern) {
       // '-' (a range in character set)
       // '&', '~', (extended character set operations)
       // '#' (comment) and WHITESPACE (ignored) in verbose mode
-      static std::string special_characters = "()[]{}?*+-|^$\\.&~# \t\n\r\v\f";
       static std::map<int, std::string> special_characters_map;
       if (special_characters_map.empty()) {
-        for (auto &sc : special_characters) {
-          special_characters_map.insert(
-              std::make_pair(static_cast<int>(sc), std::string{"\\"} + std::string(1, sc)));
+        for (auto &&sc : SPECIAL_CHARACTERS) {
+          special_characters_map.emplace(static_cast<int>(sc), std::string{"\\"} + std::string(1, sc));
         }
       }
 
-      if (special_characters.find(c) != std::string::npos) {
+      if (SPECIAL_CHARACTERS.find(c) != std::string_view::npos) {
         result_string += special_characters_map[static_cast<int>(c)];
       } else {
         result_string += c;
@@ -138,26 +140,27 @@ std::string translate(const std::string &pattern) {
 }
 
 static inline 
-std::regex compile_pattern(const std::string &pattern) {
+std::regex compile_pattern(std::string_view pattern) {
   return std::regex(translate(pattern), std::regex::ECMAScript);
 }
 
 static inline 
-bool fnmatch(const fs::path &name, const std::string &pattern) {
-  return std::regex_match(name.string(), compile_pattern(pattern));
+bool fnmatch(std::string&& name, const std::regex& pattern) {
+  return std::regex_match(std::move(name), pattern);
 }
 
 static inline 
 std::vector<fs::path> filter(const std::vector<fs::path> &names,
-                             const std::string &pattern) {
+                             std::string_view pattern) {
   // std::cout << "Pattern: " << pattern << "\n";
+  const auto pattern_re = compile_pattern(pattern);
   std::vector<fs::path> result;
-  for (auto &name : names) {
-    // std::cout << "Checking for " << name.string() << "\n";
-    if (fnmatch(name, pattern)) {
-      result.push_back(name);
-    }
-  }
+  std::copy_if(std::make_move_iterator(names.begin()), std::make_move_iterator(names.end()),
+               std::back_inserter(result),
+               [&pattern_re](const fs::path& name) { 
+                  // std::cout << "Checking for " << name.string() << "\n";
+			      return fnmatch(name.string(), pattern_re); 
+			   });
   return result;
 }
 
@@ -187,14 +190,13 @@ fs::path expand_tilde(fs::path path) {
 #endif
 
 	  std::string s = path.string();
-	  s = std::string(home) + s.substr(1, s.size() - 1);
+    s = std::string{home} + s.substr(1, s.size() - 1);
 #ifdef _WIN32
 	  free(home);
 #endif
 	  return fs::path(s).lexically_normal();
-  } else {
-    return path;
   }
+  return path;
 }
 
 static inline 
@@ -204,12 +206,15 @@ bool has_magic(const std::string &pathname) {
 }
 
 static inline 
-bool is_hidden(const std::string &pathname) {
-  return std::regex_match(pathname, std::regex("^(.*\\/)*\\.[^\\.\\/]+\\/*$"));
+constexpr bool is_hidden(std::string_view pathname) noexcept {
+    //return std::regex_match(pathname, std::regex("^(.*\\/)*\\.[^\\.\\/]+\\/*$"));
+	return pathname[0] == '.';
 }
 
 static inline 
-bool is_recursive(const std::string &pattern) { return pattern == "**"; }
+constexpr bool is_recursive(std::string_view pattern) noexcept {
+	return pattern == std::string_view{"**"};
+}
 
 static inline 
 std::vector<fs::path> iter_directory(const fs::path &dirname, bool dironly) {
@@ -246,13 +251,13 @@ std::vector<fs::path> iter_directory(const fs::path &dirname, bool dironly) {
 static inline 
 std::vector<fs::path> rlistdir(const fs::path &dirname, bool dironly) {
   std::vector<fs::path> result;
+  //std::cout << "rlistdir: " << dirname.string() << "\n";
   auto names = iter_directory(dirname, dironly);
-  for (auto &x : names) {
-    if (!is_hidden(x.string())) {
-      result.push_back(x);
-      for (auto &y : rlistdir(x, dironly)) {
-        result.push_back(y);
-      }
+  for (auto &&name : names) {
+    if (!is_hidden(name.string())) {
+      result.push_back(name);
+      auto matched_dirs = rlistdir(name, dironly);
+      std::copy(std::make_move_iterator(matched_dirs.begin()), std::make_move_iterator(matched_dirs.end()), std::back_inserter(result));
     }
   }
   return result;
@@ -261,14 +266,13 @@ std::vector<fs::path> rlistdir(const fs::path &dirname, bool dironly) {
 // This helper function recursively yields relative pathnames inside a literal
 // directory.
 static inline 
-std::vector<fs::path> glob2(const fs::path &dirname, [[maybe_unused]] const std::string &pattern,
+std::vector<fs::path> glob2(const fs::path &dirname, [[maybe_unused]] const fs::path &pattern,
                             bool dironly) {
   // std::cout << "In glob2\n";
-  std::vector<fs::path> result;
-  assert(is_recursive(pattern));
-  for (auto &dir : rlistdir(dirname, dironly)) {
-    result.push_back(dir);
-  }
+  std::vector<fs::path> result{"."};
+  assert(is_recursive(pattern.string()));
+  auto matched_dirs = rlistdir(dirname, dironly);
+  std::copy(std::make_move_iterator(matched_dirs.begin()), std::make_move_iterator(matched_dirs.end()), std::back_inserter(result));
   return result;
 }
 
@@ -276,42 +280,35 @@ std::vector<fs::path> glob2(const fs::path &dirname, [[maybe_unused]] const std:
 // They return a list of basenames.  _glob1 accepts a pattern while _glob0
 // takes a literal basename (so it only has to check for its existence).
 static inline 
-std::vector<fs::path> glob1(const fs::path &dirname, const std::string &pattern,
+std::vector<fs::path> glob1(const fs::path &dirname, const fs::path &pattern,
                             bool dironly) {
   // std::cout << "In glob1\n";
-  auto names = iter_directory(dirname, dironly);
   std::vector<fs::path> filtered_names;
-  for (auto &n : names) {
-    if (!is_hidden(n.string())) {
-      filtered_names.push_back(n.filename());
-      // if (n.is_relative()) {
-      //   // std::cout << "Filtered (Relative): " << n << "\n";
-      //   filtered_names.push_back(fs::relative(n));
+  auto names = iter_directory(dirname, dironly);
+  for (auto &&name : names) {
+    if (!is_hidden(name.string())) {
+      filtered_names.push_back(name.filename());
+      // if (name.is_relative()) {
+      //   // std::cout << "Filtered (Relative): " << name << "\n";
+      //   filtered_names.push_back(fs::relative(name));
       // } else {
-      //   // std::cout << "Filtered (Absolute): " << n << "\n";
-      //   filtered_names.push_back(n.filename());
+      //   // std::cout << "Filtered (Absolute): " << name << "\n";
+      //   filtered_names.push_back(name.filename());
       // }
     }
   }
-  return filter(filtered_names, pattern);
+  return filter(filtered_names, pattern.string());
 }
 
-static inline 
 std::vector<fs::path> glob0(const fs::path &dirname, const fs::path &basename,
                             bool /*dironly*/) {
   // std::cout << "In glob0\n";
-  std::vector<fs::path> result;
-  if (basename.empty()) {
-    // 'q*x/' should match only directories.
-    if (fs::is_directory(dirname)) {
-      result = {basename};
-    }
-  } else {
-    if (fs::exists(dirname / basename)) {
-      result = {basename};
-    }
+
+  // 'q*x/' should match only directories.
+  if ((basename.empty() && fs::is_directory(dirname)) || (!basename.empty() && fs::exists(dirname / basename))) {
+    return {basename};
   }
-  return result;
+  return {};
 }
 
 static inline 
@@ -324,58 +321,47 @@ std::vector<fs::path> glob(const fs::path &pathspec, bool recursive = false,
   path = expand_tilde(path);
 
   auto dirname = path.parent_path();
-  const auto basename = path.filename();
+  const auto basename = path.filename().string();
   auto pathname = path.string();
 
   if (!has_magic(pathname)) {
     assert(!dironly);
-    if (!basename.empty()) {
-      if (fs::exists(path)) {
-        result.push_back(path);
-      }
-    } else {
-      // Patterns ending with a slash should match only directories
-      if (fs::is_directory(dirname)) {
-        result.push_back(path);
-      }
+
+    // Patterns ending with a slash should match only directories
+    if ((!basename.empty() && fs::exists(path)) || (basename.empty() && fs::is_directory(dirname))) {
+      result.push_back(path);
     }
     return result;
   }
 
   if (dirname.empty()) {
-    if (recursive && is_recursive(basename.string())) {
-      return glob2(dirname, basename.string(), dironly);
-    } else {
-      return glob1(dirname, basename.string(), dironly);
+    if (recursive && is_recursive(basename)) {
+      return glob2(dirname, basename, dironly);
     }
+    return glob1(dirname, basename, dironly);
   }
 
-  std::vector<fs::path> dirs;
+  std::vector<fs::path> dirs{dirname};
   if (dirname != fs::path(pathname) && has_magic(dirname.string())) {
     dirs = glob(dirname, recursive, true);
-  } else {
-    dirs = {dirname};
   }
 
-  std::function<std::vector<fs::path>(const fs::path &, const std::string &, bool)>
-      glob_in_dir;
-  if (has_magic(basename.string())) {
-    if (recursive && is_recursive(basename.string())) {
+  auto glob_in_dir = glob0;
+  if (has_magic(basename)) {
+    if (recursive && is_recursive(basename)) {
       glob_in_dir = glob2;
     } else {
       glob_in_dir = glob1;
     }
-  } else {
-    glob_in_dir = glob0;
   }
 
   for (auto &d : dirs) {
-    for (auto &name : glob_in_dir(d, basename.string(), dironly)) {
+    for (auto &&name : glob_in_dir(d, basename, dironly)) {
       fs::path subresult = name;
       if (name.parent_path().empty()) {
         subresult = d / name;
       }
-      result.push_back(subresult);
+      result.push_back(subresult.lexically_normal());
     }
   }
 
@@ -418,7 +404,7 @@ std::vector<fs::path> glob_path(const std::string& basepath, const std::string& 
 /// \return vector of paths that match the pathname
 ///
 /// Globs recursively.
-/// The pattern ì**î will match any files and zero or more directories, subdirectories and
+/// The pattern ‚Äú**‚Äù will match any files and zero or more directories, subdirectories and
 /// symbolic links to directories.
 static inline 
 std::vector<fs::path> rglob(const std::string &pathname) {
@@ -430,7 +416,7 @@ std::vector<fs::path> rglob(const std::string &pathname) {
 /// \return vector of paths that match the pathname
 ///
 /// Globs recursively.
-/// The pattern ì**î will match any files and zero or more directories, subdirectories and
+/// The pattern ‚Äú**‚Äù will match any files and zero or more directories, subdirectories and
 /// symbolic links to directories.
 static inline 
 std::vector<fs::path> rglob_path(const std::string& basepath, const std::string& pathname) {
@@ -442,10 +428,9 @@ std::vector<fs::path> rglob_path(const std::string& basepath, const std::string&
 static inline 
 std::vector<fs::path> glob(const std::vector<std::string> &pathnames) {
   std::vector<fs::path> result;
-  for (auto &pathname : pathnames) {
-    for (auto &match : glob(pathname, false)) {
-      result.push_back(std::move(match));
-    }
+  for (const auto &pathname : pathnames) {
+    auto matched_res = glob(pathname, false);
+    std::copy(std::make_move_iterator(matched_res.begin()), std::make_move_iterator(matched_res.end()), std::back_inserter(result));
   }
   return result;
 }
@@ -468,10 +453,9 @@ std::vector<fs::path> glob_path(const std::string& basepath, const std::vector<s
 static inline 
 std::vector<fs::path> rglob(const std::vector<std::string> &pathnames) {
   std::vector<fs::path> result;
-  for (auto &pathname : pathnames) {
-    for (auto &match : glob(pathname, true)) {
-      result.push_back(std::move(match));
-    }
+  for (const auto &pathname : pathnames) {
+    auto matched_res = glob(pathname, true);
+    std::copy(std::make_move_iterator(matched_res.begin()), std::make_move_iterator(matched_res.end()), std::back_inserter(result));
   }
   return result;
 }
