@@ -261,7 +261,7 @@ std::vector<fs::path> rlistdir(const fs::path &dirname, bool dironly) {
 // This helper function recursively yields relative pathnames inside a literal
 // directory.
 static inline 
-std::vector<fs::path> glob2(const fs::path &dirname, [[maybe_unused]] const fs::path& pattern,
+std::vector<fs::path> glob2(const fs::path &dirname, [[maybe_unused]] const std::string &pattern,
                             bool dironly) {
   // std::cout << "In glob2\n";
   std::vector<fs::path> result;
@@ -276,7 +276,7 @@ std::vector<fs::path> glob2(const fs::path &dirname, [[maybe_unused]] const fs::
 // They return a list of basenames.  _glob1 accepts a pattern while _glob0
 // takes a literal basename (so it only has to check for its existence).
 static inline 
-std::vector<fs::path> glob1(const fs::path &dirname, const fs::path &pattern,
+std::vector<fs::path> glob1(const fs::path &dirname, const std::string &pattern,
                             bool dironly) {
   // std::cout << "In glob1\n";
   auto names = iter_directory(dirname, dironly);
@@ -344,9 +344,9 @@ std::vector<fs::path> glob(const fs::path &pathspec, bool recursive = false,
 
   if (dirname.empty()) {
     if (recursive && is_recursive(basename.string())) {
-      return glob2(dirname, basename, dironly);
+      return glob2(dirname, basename.string(), dironly);
     } else {
-      return glob1(dirname, basename, dironly);
+      return glob1(dirname, basename.string(), dironly);
     }
   }
 
@@ -357,7 +357,7 @@ std::vector<fs::path> glob(const fs::path &pathspec, bool recursive = false,
     dirs = {dirname};
   }
 
-  std::function<std::vector<fs::path>(const fs::path &, const fs::path &, bool)>
+  std::function<std::vector<fs::path>(const fs::path &, const std::string &, bool)>
       glob_in_dir;
   if (has_magic(basename.string())) {
     if (recursive && is_recursive(basename.string())) {
@@ -370,7 +370,7 @@ std::vector<fs::path> glob(const fs::path &pathspec, bool recursive = false,
   }
 
   for (auto &d : dirs) {
-    for (auto &name : glob_in_dir(d, basename, dironly)) {
+    for (auto &name : glob_in_dir(d, basename.string(), dironly)) {
       fs::path subresult = name;
       if (name.parent_path().empty()) {
         subresult = d / name;
