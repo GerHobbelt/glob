@@ -99,7 +99,4 @@ std::vector<fs::path> rglob_path(const std::string& basepath, const std::initial
 /// Helper function: expand '~' HOME part (when used in the path) and normalize the given path.
 fs::path expand_and_normalize_tilde(fs::path path);
 
-/// Returns true if the input path matches the glob pattern
-  bool fnmatch(const fs::path &name, const std::string &pattern);
-
 } // namespace glob
