@@ -186,7 +186,6 @@ bool has_magic(const std::string &pathname) {
 }
 
 constexpr bool is_hidden(std::string_view pathname) noexcept {
-    //return std::regex_match(pathname, std::regex("^(.*\\/)*\\.[^\\.\\/]+\\/*$"));
 	return pathname[0] == '.';
 }
 
@@ -230,7 +229,7 @@ std::vector<fs::path> rlistdir(const fs::path &dirname, bool dironly) {
   //std::cout << "rlistdir: " << dirname.string() << "\n";
   auto names = iter_directory(dirname, dironly);
   for (auto &&name : names) {
-    if (!is_hidden(name.string())) {
+    if (!is_hidden(name.filename().string())) {
       result.push_back(name);
       auto matched_dirs = rlistdir(name, dironly);
       std::copy(std::make_move_iterator(matched_dirs.begin()), std::make_move_iterator(matched_dirs.end()), std::back_inserter(result));
@@ -261,7 +260,7 @@ std::vector<fs::path> glob1(const fs::path &dirname, const fs::path &pattern,
   std::vector<fs::path> filtered_names;
   auto names = iter_directory(dirname, dironly);
   for (auto &&name : names) {
-    if (!is_hidden(name.string())) {
+    if (!is_hidden(name.filename().string())) {
       filtered_names.push_back(name.filename());
       // if (name.is_relative()) {
       //   // std::cout << "Filtered (Relative): " << name << "\n";
