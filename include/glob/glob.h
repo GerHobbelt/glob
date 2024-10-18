@@ -38,6 +38,35 @@ namespace fs = ghc::filesystem;
 namespace fs = std::filesystem;
 #endif
 
+
+/// Helper struct for extended options
+struct options {
+	fs::path basepath;
+	std::vector<std::string> pathnames;
+	bool include_hidden_entries = false;
+
+	// TODO:
+	// 
+	// - filter regexes / wildcards: both a positive (pass) and a negative (reject) set.
+	// - filter callback
+	// - progress callback
+
+	options(const fs::path& basepath, std::vector<std::string> pathnames, bool include_hidden_entries = false)
+		: basepath(basepath),
+		pathnames(pathnames),
+		include_hidden_entries(include_hidden_entries)
+	{};
+	/// \param basepath the root directory to run in
+	/// \param pathname string containing a path specification
+	/// Convenience constructor for use when only a single pathspec will be used
+	options(const fs::path& basepath, const std::string& pathname, bool include_hidden_entries = false)
+		: basepath(basepath),
+		pathnames({pathname}),
+		include_hidden_entries(include_hidden_entries)
+	{};
+};
+
+
 /// \param pathname string containing a path specification
 /// \return vector of paths that match the pathname
 ///
