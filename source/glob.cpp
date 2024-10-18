@@ -9,6 +9,76 @@
 
 namespace glob {
 
+/// Helper struct for extended options
+struct options {
+  fs::path basepath;
+  std::vector<std::string> pathnames;
+  bool include_hidden_entries = false;
+  options(const fs::path& basepath, std::vector<std::string> pathnames, bool include_hidden_entries = false)
+	  : basepath(basepath),
+		pathnames(pathnames),
+		include_hidden_entries(include_hidden_entries)
+  {};
+  /// \param basepath the root directory to run in
+  /// \param pathname string containing a path specification
+  /// Convenience constructor for use when only a single pathspec will be used
+  options(const fs::path& basepath, const std::string& pathname, bool include_hidden_entries = false) : basepath(basepath), pathnames({pathname}), include_hidden_entries(include_hidden_entries) {};
+};
+
+/// \param pathname string containing a path specification
+/// \return vector of paths that match the pathname
+///
+/// Pathnames can be absolute (/usr/src/Foo/Makefile) or relative (../../Tools/*/*.gif)
+/// Pathnames can contain shell-style wildcards
+/// Broken symlinks are included in the results (as in the shell)
+GLOBLIB_IMPL
+std::vector<fs::path> glob(const std::string &pathname);
+
+/// \param pathnames string containing a path specification
+/// \return vector of paths that match the pathname
+///
+/// Globs recursively.
+/// The pattern “**” will match any files and zero or more directories, subdirectories and
+/// symbolic links to directories.
+GLOBLIB_IMPL
+std::vector<fs::path> rglob(const std::string &pathname);
+
+/// \param opts settings to use
+/// \return vector of paths that match the pathname
+///
+/// Pathnames can be absolute (/usr/src/Foo/Makefile) or relative (../../Tools/*/*.gif)
+/// Pathnames can contain shell-style wildcards
+/// Broken symlinks are included in the results (as in the shell)
+GLOBLIB_IMPL
+std::vector<std::filesystem::path> glob(const glob::options& opts);
+
+/// \param opts settings to use
+/// \return vector of paths that match
+///
+/// Globs recursively.
+/// The pattern “**” will match any files and zero or more directories, subdirectories and
+/// symbolic links to directories.
+GLOBLIB_IMPL
+std::vector<std::filesystem::path> rglob(const glob::options& opts);
+
+/// Runs `glob` against each pathname in `pathnames` and accumulates the results
+GLOBLIB_IMPL
+std::vector<std::filesystem::path> glob(const std::vector<std::string> &pathnames);
+
+/// Runs `rglob` against each pathname in `pathnames` and accumulates the results
+GLOBLIB_IMPL
+std::vector<std::filesystem::path> rglob(const std::vector<std::string> &pathnames);
+
+/// Initializer list overload for convenience
+GLOBLIB_IMPL
+std::vector<std::filesystem::path>
+glob(const std::initializer_list<std::string> &pathnames);
+
+/// Initializer list overload for convenience
+GLOBLIB_IMPL
+std::vector<std::filesystem::path>
+rglob(const std::initializer_list<std::string> &pathnames);
+
 namespace {
 
 static constexpr auto SPECIAL_CHARACTERS = std::string_view{"()[]{}?*+-|^$\\.&~# \t\n\r\v\f"};
@@ -224,12 +294,12 @@ std::vector<fs::path> iter_directory(const fs::path &dirname, bool dironly) {
 }
 
 // Recursively yields relative pathnames inside a literal directory.
-std::vector<fs::path> rlistdir(const fs::path &dirname, bool dironly) {
+std::vector<fs::path> rlistdir(const fs::path &dirname, bool dironly, bool includehidden) {
   std::vector<fs::path> result;
   //std::cout << "rlistdir: " << dirname.string() << "\n";
   auto names = iter_directory(dirname, dironly);
   for (auto &&name : names) {
-    if (!is_hidden(name.filename().string())) {
+    if (includehidden || !is_hidden(name.filename().string())) {
       result.push_back(name);
       auto matched_dirs = rlistdir(name, dironly);
       std::copy(std::make_move_iterator(matched_dirs.begin()), std::make_move_iterator(matched_dirs.end()), std::back_inserter(result));
@@ -260,7 +330,7 @@ std::vector<fs::path> glob1(const fs::path &dirname, const fs::path &pattern,
   std::vector<fs::path> filtered_names;
   auto names = iter_directory(dirname, dironly);
   for (auto &&name : names) {
-    if (!is_hidden(name.filename().string())) {
+    if (includehidden || !is_hidden(name.filename().string())) {
       filtered_names.push_back(name.filename());
       // if (name.is_relative()) {
       //   // std::cout << "Filtered (Relative): " << name << "\n";
@@ -407,7 +477,7 @@ std::vector<fs::path> glob_path(const std::string& basepath, const std::vector<s
   std::vector<fs::path> result;
   for (auto& pathname : pathnames)
   {
-	for (auto& match : glob(fs::path(basepath) / pathname, false))
+	for (auto& match : glob(fs::path(basepath) / pathname, false, false, opts.include_hidden_entries))
 	{
 	  result.push_back(std::move(match));
 	}
@@ -429,7 +499,7 @@ std::vector<fs::path> rglob(const std::vector<std::string> &pathnames) {
 std::vector<fs::path> rglob_path(const std::string& basepath, const std::vector<std::string>& pathnames) {
   std::vector<fs::path> result;
   for (auto &pathname : pathnames) {
-    for (auto &match : glob(fs::path(basepath) / pathname, true)) {
+    for (auto &match : glob(fs::path(basepath) / pathname, true, false, opts.include_hidden_entries)) {
       result.push_back(std::move(match));
     }
   }
