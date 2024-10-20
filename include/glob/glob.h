@@ -43,13 +43,15 @@ namespace fs = std::filesystem;
 struct options {
 	fs::path basepath;
 	std::vector<std::string> pathnames;
+	std::vector<int> max_recursion_depth;  // -1 means: unlimited depth
 	bool include_hidden_entries = false;
 
-	// TODO:
-	// 
-	// - filter regexes / wildcards: both a positive (pass) and a negative (reject) set.
-	// - filter callback
-	// - progress callback
+	// filter regexes / wildcards: both a positive (pass) and a negative (reject) set.
+	std::vector<std::string> accepts;
+	std::vector<std::string> rejects;
+
+	// filter callback: returns pass/reject for given path
+	// progress callback: shows currently processed path, pass/reject status and progress/scan completion estimate.
 
 	options(const fs::path& basepath, std::vector<std::string> pathnames, bool include_hidden_entries = false)
 		: basepath(basepath),
