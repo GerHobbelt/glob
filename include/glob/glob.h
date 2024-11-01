@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#if !defined(GLOB_USE_GHC_FILESYSTEM)
+#if !defined(GLOB_USE_GHC_FILESYSTEM) || defined(GHC_DO_NOT_USE_STD_FS)
 #if !__has_include(<filesystem>) || defined(GHC_DO_NOT_USE_STD_FS)
 #define GLOB_USE_GHC_FILESYSTEM   1
 #ifndef GHC_DO_NOT_USE_STD_FS
