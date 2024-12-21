@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#if !defined(GLOB_USE_GHC_FILESYSTEM)
+#if !defined(GLOB_USE_GHC_FILESYSTEM) || defined(GHC_DO_NOT_USE_STD_FS)
 #if !__has_include(<filesystem>) || defined(GHC_DO_NOT_USE_STD_FS)
 #define GLOB_USE_GHC_FILESYSTEM   1
 #ifndef GHC_DO_NOT_USE_STD_FS
@@ -37,6 +37,37 @@ namespace fs = ghc::filesystem;
 #else
 namespace fs = std::filesystem;
 #endif
+
+
+/// Helper struct for extended options
+struct options {
+	fs::path basepath;
+	std::vector<std::string> pathnames;
+	std::vector<int> max_recursion_depth;  // -1 means: unlimited depth
+	bool include_hidden_entries = false;
+
+	// filter regexes / wildcards: both a positive (pass) and a negative (reject) set.
+	std::vector<std::string> accepts;
+	std::vector<std::string> rejects;
+
+	// filter callback: returns pass/reject for given path
+	// progress callback: shows currently processed path, pass/reject status and progress/scan completion estimate.
+
+	options(const fs::path& basepath, std::vector<std::string> pathnames, bool include_hidden_entries = false)
+		: basepath(basepath),
+		pathnames(pathnames),
+		include_hidden_entries(include_hidden_entries)
+	{};
+	/// \param basepath the root directory to run in
+	/// \param pathname string containing a path specification
+	/// Convenience constructor for use when only a single pathspec will be used
+	options(const fs::path& basepath, const std::string& pathname, bool include_hidden_entries = false)
+		: basepath(basepath),
+		pathnames({pathname}),
+		include_hidden_entries(include_hidden_entries)
+	{};
+};
+
 
 /// \param pathname string containing a path specification
 /// \return vector of paths that match the pathname

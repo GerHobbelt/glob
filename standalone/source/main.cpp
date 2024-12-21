@@ -1,4 +1,4 @@
-﻿#include <glob/glob.h>
+#include <glob/glob.h>
 #include <glob/version.h>
 
 #include <clipp.h>
@@ -82,7 +82,6 @@ int main(int argc, const char** argv)
 	switch (selected)
 	{
 	default:
-
 	case mode::none:
 	case mode::help:
 		help();
