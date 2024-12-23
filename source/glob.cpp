@@ -355,6 +355,8 @@ std::vector<fs::path> glob(const std::string& pathname, bool recursive = false,
 struct searchspec {
 	fs::path basepath;		// the non-wildcarded base
 	fs::path deep_spec;   // the rest of the searchspec; may contain wildcards
+	int actual_depth;
+	int max_recursion_depth;  // -1 means: unlimited depth
 };
 
 struct cached_options {
@@ -374,7 +376,8 @@ bool glob_42(results &rv, cached_options &cache, const options &search_spec) {
 		if (!cache.basepath.empty())
 			cache.basepath = expand_tilde(cache.basepath);
 
-		for (fs::path pn : search_spec.pathnames) {
+		for (int index = 0; index < search_spec.pathnames.size(); index++) {
+			fs::path pn = search_spec.pathnames[index];
 			pn = expand_tilde(pn);
 			if (pn.is_relative() && !cache.basepath.empty())
 				pn = cache.basepath / pn;
@@ -383,9 +386,15 @@ bool glob_42(results &rv, cached_options &cache, const options &search_spec) {
 				pn = fs::current_path();
 			}
 
+			int max_depth = search_spec.max_recursion_depth[index];
+			if (max_depth < 0)
+				max_depth = INT_MAX;
+
 			searchspec spec{
 				.basepath = "",
-				.deep_spec = pn
+				.deep_spec = pn,
+				.actual_depth = 0,
+				.max_recursion_depth = max_depth
 			};
 			cache.searchpaths.push_back(spec);
 		}
@@ -399,6 +408,9 @@ bool glob_42(results &rv, cached_options &cache, const options &search_spec) {
 		return false;
 
 	searchspec pathspec = cache.searchpaths[cache.searchpath_index];
+	if (pathspec.actual_depth > pathspec.max_recursion_depth)
+		return true;
+
 	try {
 		fs::path path = pathspec.deep_spec;
 
@@ -440,7 +452,9 @@ bool glob_42(results &rv, cached_options &cache, const options &search_spec) {
 						// this effectively drops the '**' from the search path...
 						searchspec spec{
 						.basepath = basepath,
-						.deep_spec = sub_spec
+						.deep_spec = sub_spec,
+						.actual_depth = pathspec.actual_depth,
+						.max_recursion_depth = pathspec.max_recursion_depth
 						};
 						cache.searchpaths.push_back(spec);
 					}
@@ -452,17 +466,22 @@ bool glob_42(results &rv, cached_options &cache, const options &search_spec) {
 						//    /bla/**/*
 						searchspec spec{
 						.basepath = basepath,
-						.deep_spec = "*"
+						.deep_spec = "*",
+						.actual_depth = pathspec.actual_depth,
+						.max_recursion_depth = pathspec.max_recursion_depth
 						};
 						cache.searchpaths.push_back(spec);
 					}
 				}
 
 				std::vector<fs::path> dirs_to_scan;
+				std::vector<int> dir_depths;
 				dirs_to_scan.push_back(basepath);
+				dir_depths.push_back(pathspec.actual_depth);
 
 				for (int index = 0; index < dirs_to_scan.size(); index++) {
 					fs::path dirpath = dirs_to_scan[index];
+					int dir_depth = dir_depths[index];
 
 					if (index > 100)
 						break;
@@ -476,13 +495,16 @@ bool glob_42(results &rv, cached_options &cache, const options &search_spec) {
 							if (has_subspec) {
 								searchspec spec{
 								.basepath = ep,
-								.deep_spec = sub_spec
+								.deep_spec = sub_spec,
+								.actual_depth = dir_depth + 1,
+								.max_recursion_depth = pathspec.max_recursion_depth
 								};
 								cache.searchpaths.push_back(spec);
 							}
 							// are we processing a '**' wildcard?
 							if (recursive_scan_dirtree) {
 								dirs_to_scan.push_back(ep);
+								dir_depths.push_back(dir_depth + 1);
 							}
 						}
 					}

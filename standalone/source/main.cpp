@@ -112,13 +112,9 @@ int main(int argc, const char** argv)
 	{
 		if (bfs_mode)
 		{
-			glob::options spec(basepath, patterns);
-			if (!recursive) {
-				auto &vec = spec.max_recursion_depth;
-				std::fill(vec.begin(), vec.end(), 1);
-			}
+			glob::options spec(basepath, patterns, recursive);
 
-			glob::results results = glob::glob(spec);
+			glob::results results = glob::glob<glob::results>(spec);
 			for (glob::path_w_extattr& match : results.pathnames)
 			{
 				std::cout << match << "\n";

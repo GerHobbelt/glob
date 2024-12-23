@@ -50,31 +50,43 @@ struct options {
 
 	// progress callback: shows currently processed path, pass/reject status and progress/scan completion estimate.
 
-	options(const fs::path& basepath, std::vector<std::string> pathnames)
+	void init_max_recursion_depth_set(bool recursive_search = true)
+	{
+		max_recursion_depth.resize(pathnames.size());
+		for (int index = 0; index < pathnames.size(); index++) {
+			max_recursion_depth[index] = (recursive_search ? -1 : 1);
+		}
+	};
+
+	options(const fs::path& basepath, std::vector<std::string> pathnames, bool recursive_search = true)
 		: basepath(basepath),
 		pathnames(pathnames)
-	{};
+	{
+		init_max_recursion_depth_set(recursive_search);
+	};
 	/// \param basepath the root directory to run in
 	/// \param pathname string containing a path specification
 	/// Convenience constructor for use when only a single pathspec will be used
-	options(const fs::path& basepath, const std::string& pathname)
+	options(const fs::path& basepath, const std::string& pathname, bool recursive_search = true)
 		: basepath(basepath),
 		pathnames({pathname})
-	{};
+	{
+		init_max_recursion_depth_set(recursive_search);
+	};
 };
 
 /// Helper struct for extended file/path attributes
 class path_w_extattr : public fs::path {
 public:
-	path_w_extattr(const fs::path &pathspec):
-		fs::path(pathspec) {
+	path_w_extattr(const fs::path &pathspec, int depth = 0, bool hidden = false):
+		fs::path(pathspec), path_depth_(depth), is_hidden_(hidden) {
 	}
 
-	path_w_extattr(const fs::path &&pathspec) :
-		fs::path(pathspec) {
+	path_w_extattr(const fs::path &&pathspec, int depth = 0, bool hidden = false) :
+		fs::path(pathspec), path_depth_(depth), is_hidden_(hidden) {
 	}
 
-	virtual ~path_w_extattr() = default;
+	~path_w_extattr() = default;
 
 	bool is_hidden(void) const {
 		return is_hidden_;
@@ -92,7 +104,7 @@ protected:
 
 /// Helper struct for extended glob results' storage
 struct results {
-	std::vector<fs::path> pathnames;
+	std::vector<path_w_extattr> pathnames;
 };
 
 /// Helper struct for extended glob results' storage
