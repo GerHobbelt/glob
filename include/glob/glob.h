@@ -42,13 +42,9 @@ namespace fs = std::filesystem;
 /// Helper struct for extended options
 struct options {
 	fs::path basepath;
-	std::vector<std::string> pathnames;
+	std::vector<std::string> pathnames;		 // a set of paths to scan (MAY contain wildcards at both directory and file level, e.g. `/bla/**/sub*.dir/*` or `/bla/foo*.pdf`)
 	std::vector<int> max_recursion_depth;  // -1 means: unlimited depth
-	bool include_hidden_entries = false;
-
-	// filter regexes / wildcards: both a positive (pass) and a negative (reject) set.
-	std::vector<std::string> accepts;
-	std::vector<std::string> rejects;
+	bool include_hidden_entries = false;   // include files/directories which start with a '.' dot
 
 	// filter callback: returns pass/reject for given path
 
@@ -68,13 +64,8 @@ struct options {
 };
 
 /// Helper struct for extended file/path attributes
-struct path_w_extattr : public fs::path {
-	bool is_hidden = false;
-	bool is_readonly = false;
-	bool is_executable = false;
-
-	int path_depth = 0;
-
+class path_w_extattr : public fs::path {
+public:
 	path_w_extattr(const fs::path &pathspec):
 		fs::path(pathspec) {
 	}
@@ -82,12 +73,31 @@ struct path_w_extattr : public fs::path {
 	path_w_extattr(const fs::path &&pathspec) :
 		fs::path(pathspec) {
 	}
+
+	virtual ~path_w_extattr() = default;
+
+	bool is_hidden(void) const {
+		return is_hidden_;
+	}
+
+	int path_depth(void) const {
+		return path_depth_;
+	}
+
+protected:
+	bool is_hidden_ = false;
+
+	int path_depth_ = 0;
 };
 
 /// Helper struct for extended glob results' storage
 struct results {
-	fs::path basepath;
-	std::vector<path_w_extattr> pathnames;
+	std::vector<fs::path> pathnames;
+};
+
+/// Helper struct for extended glob results' storage
+struct extended_results {
+	std::vector<std::unique_ptr<path_w_extattr>> pathnames;
 };
 
 /// \param pathname string containing a path specification
@@ -148,6 +158,7 @@ std::vector<fs::path> rglob(const std::initializer_list<std::string> &pathnames)
 /// Initializer list overload for convenience
 std::vector<fs::path> rglob_path(const std::string& basepath, const std::initializer_list<std::string>& pathnames);
 
+template <class results>
 results glob(const options &search_specification);
 
 /// Helper function: expand '~' HOME part (when used in the path) and normalize the given path.

@@ -364,7 +364,8 @@ struct cached_options {
 	std::vector<std::string> error_msg;
 };
 
-bool glob_42(results &results, cached_options &cache, const options &search_spec) {
+template <class results>
+bool glob_42(results &rv, cached_options &cache, const options &search_spec) {
 	std::vector<fs::path> result;
 
 	// preparation / init phase
@@ -389,7 +390,7 @@ bool glob_42(results &results, cached_options &cache, const options &search_spec
 			cache.searchpaths.push_back(spec);
 		}
 
-		results.basepath = cache.basepath;
+		//rv.basepath = cache.basepath;
 
 		cache.searchpath_index = 0;
 	}
@@ -492,8 +493,9 @@ bool glob_42(results &results, cached_options &cache, const options &search_spec
 		}
 
 		for (const fs::path &entry : result) {
-			path_w_extattr ep(entry);
-			results.pathnames.push_back(ep);
+			//path_w_extattr ep(entry);
+			//rv.pathnames.push_back(ep);
+			rv.pathnames.push_back(entry);
 		}
 	}
 	catch (std::exception& ex) {
@@ -506,6 +508,15 @@ bool glob_42(results &results, cached_options &cache, const options &search_spec
 
 	return true;
 }
+
+template
+bool glob_42<glob::results>(glob::results &rv, cached_options &cache, const options &search_spec);
+
+template <>
+bool glob_42<glob::extended_results>(glob::extended_results &rv, cached_options &cache, const options &search_spec) {
+	return false;
+}
+
 
 } // namespace end
 
@@ -622,16 +633,32 @@ std::vector<fs::path> rglob_path(const std::string& basepath, const std::initial
 }
 
 
-results glob(const options &search_spec) {
+// explicit instantiations/specialization made available in this library:
+
+template<>
+results glob<results>(const options &search_spec) {
 	results rv;
 	cached_options cache;
 
-	while (glob_42(rv, cache, search_spec)) {
+	while (glob_42<results>(rv, cache, search_spec)) {
 		cache.searchpath_index++;
 	}
 
 	return rv;
 }
+
+template<>
+extended_results glob<extended_results>(const options &search_spec) {
+	extended_results rv;
+	cached_options cache;
+
+	while (glob_42<extended_results>(rv, cache, search_spec)) {
+		cache.searchpath_index++;
+	}
+
+	return {};  // TODO
+}
+
 
 
 /// Helper function: expand '~' HOME part (when used in the path) and normalize the given path.
