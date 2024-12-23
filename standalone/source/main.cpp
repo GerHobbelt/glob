@@ -5,6 +5,7 @@
 #include <iostream>
 #include <string>
 #include <set>
+#include <algorithm>
 
 #include <ghc/fs_std.hpp>  // namespace fs = std::filesystem;   or   namespace fs = ghc::filesystem;
 
@@ -51,6 +52,7 @@ int main(int argc, const char** argv)
 	using namespace clipp;
 
 	bool recursive = false;
+	bool bfs_mode = false;
 	std::vector<std::string> patterns;
 	std::set<std::string> tags;
 	std::string basepath;
@@ -60,7 +62,9 @@ int main(int argc, const char** argv)
 	auto options = (
 		option("-r", "--recursive").set(recursive) % "Run glob recursively",
 		repeatable(option("-i", "--input").set(selected, mode::glob) & values("patterns", patterns)) % "Patterns to match",
-		option("-b", "--basepath").set(basepath) % "Base directory to glob in"
+		option("-b", "--basepath").set(basepath) % "Base directory to glob in",
+		option("--bfs").set(bfs_mode) % "BFS mode instead of (default) DFS"
+
 	);
 	auto cli = (
 		(options
@@ -106,37 +110,51 @@ int main(int argc, const char** argv)
 
 	try
 	{
-		if (recursive)
+		if (bfs_mode)
 		{
-			if (!basepath.empty())
-			{
-				for (auto& match : glob::rglob_path(basepath, patterns))
-				{
-					std::cout << match << "\n";
-				}
-			} 
-			else
-			{
-				for (auto& match : glob::rglob(patterns))
-				{
-					std::cout << match << "\n";
-				}
+			glob::options spec(basepath, patterns);
+			if (!recursive) {
+				auto &vec = spec.max_recursion_depth;
+				std::fill(vec.begin(), vec.end(), 1);
 			}
-		} 
+
+			glob::results results = glob::glob(spec);
+			for (glob::path_w_extattr& match : results.pathnames)
+			{
+				std::cout << match << "\n";
+			}
+		}
 		else
 		{
-			if (!basepath.empty())
+			if (recursive)
 			{
-				for (auto& match : glob::glob_path(basepath, patterns))
+				if (!basepath.empty())
 				{
-					std::cout << match << "\n";
+					for (auto& match : glob::rglob_path(basepath, patterns))
+					{
+						std::cout << match << "\n";
+					}
+				} else
+				{
+					for (auto& match : glob::rglob(patterns))
+					{
+						std::cout << match << "\n";
+					}
 				}
-			} 
-			else
+			} else
 			{
-				for (auto& match : glob::glob(patterns))
+				if (!basepath.empty())
 				{
-					std::cout << match << "\n";
+					for (auto& match : glob::glob_path(basepath, patterns))
+					{
+						std::cout << match << "\n";
+					}
+				} else
+				{
+					for (auto& match : glob::glob(patterns))
+					{
+						std::cout << match << "\n";
+					}
 				}
 			}
 		}

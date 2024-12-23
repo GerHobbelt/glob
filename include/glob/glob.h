@@ -51,23 +51,44 @@ struct options {
 	std::vector<std::string> rejects;
 
 	// filter callback: returns pass/reject for given path
+
 	// progress callback: shows currently processed path, pass/reject status and progress/scan completion estimate.
 
-	options(const fs::path& basepath, std::vector<std::string> pathnames, bool include_hidden_entries = false)
+	options(const fs::path& basepath, std::vector<std::string> pathnames)
 		: basepath(basepath),
-		pathnames(pathnames),
-		include_hidden_entries(include_hidden_entries)
+		pathnames(pathnames)
 	{};
 	/// \param basepath the root directory to run in
 	/// \param pathname string containing a path specification
 	/// Convenience constructor for use when only a single pathspec will be used
-	options(const fs::path& basepath, const std::string& pathname, bool include_hidden_entries = false)
+	options(const fs::path& basepath, const std::string& pathname)
 		: basepath(basepath),
-		pathnames({pathname}),
-		include_hidden_entries(include_hidden_entries)
+		pathnames({pathname})
 	{};
 };
 
+/// Helper struct for extended file/path attributes
+struct path_w_extattr : public fs::path {
+	bool is_hidden = false;
+	bool is_readonly = false;
+	bool is_executable = false;
+
+	int path_depth = 0;
+
+	path_w_extattr(const fs::path &pathspec):
+		fs::path(pathspec) {
+	}
+
+	path_w_extattr(const fs::path &&pathspec) :
+		fs::path(pathspec) {
+	}
+};
+
+/// Helper struct for extended glob results' storage
+struct results {
+	fs::path basepath;
+	std::vector<path_w_extattr> pathnames;
+};
 
 /// \param pathname string containing a path specification
 /// \return vector of paths that match the pathname
@@ -126,6 +147,8 @@ std::vector<fs::path> rglob(const std::initializer_list<std::string> &pathnames)
 
 /// Initializer list overload for convenience
 std::vector<fs::path> rglob_path(const std::string& basepath, const std::initializer_list<std::string>& pathnames);
+
+results glob(const options &search_specification);
 
 /// Helper function: expand '~' HOME part (when used in the path) and normalize the given path.
 fs::path expand_and_normalize_tilde(fs::path path);

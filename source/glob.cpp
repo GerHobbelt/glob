@@ -6,78 +6,9 @@
 #include <map>
 #include <regex>
 #include <string_view>
+#include <format>
 
 namespace glob {
-
-/// Helper struct for extended options
-struct options {
-  fs::path basepath;
-  std::vector<std::string> pathnames;
-  bool include_hidden_entries = false;
-  options(const fs::path& basepath, std::vector<std::string> pathnames, bool include_hidden_entries = false)
-	  : basepath(basepath),
-		pathnames(pathnames),
-		include_hidden_entries(include_hidden_entries)
-  {};
-  /// \param basepath the root directory to run in
-  /// \param pathname string containing a path specification
-  /// Convenience constructor for use when only a single pathspec will be used
-  options(const fs::path& basepath, const std::string& pathname, bool include_hidden_entries = false) : basepath(basepath), pathnames({pathname}), include_hidden_entries(include_hidden_entries) {};
-};
-
-/// \param pathname string containing a path specification
-/// \return vector of paths that match the pathname
-///
-/// Pathnames can be absolute (/usr/src/Foo/Makefile) or relative (../../Tools/*/*.gif)
-/// Pathnames can contain shell-style wildcards
-/// Broken symlinks are included in the results (as in the shell)
-GLOBLIB_IMPL
-std::vector<fs::path> glob(const std::string &pathname);
-
-/// \param pathnames string containing a path specification
-/// \return vector of paths that match the pathname
-///
-/// Globs recursively.
-/// The pattern “**” will match any files and zero or more directories, subdirectories and
-/// symbolic links to directories.
-GLOBLIB_IMPL
-std::vector<fs::path> rglob(const std::string &pathname);
-
-/// \param opts settings to use
-/// \return vector of paths that match the pathname
-///
-/// Pathnames can be absolute (/usr/src/Foo/Makefile) or relative (../../Tools/*/*.gif)
-/// Pathnames can contain shell-style wildcards
-/// Broken symlinks are included in the results (as in the shell)
-GLOBLIB_IMPL
-std::vector<std::filesystem::path> glob(const glob::options& opts);
-
-/// \param opts settings to use
-/// \return vector of paths that match
-///
-/// Globs recursively.
-/// The pattern “**” will match any files and zero or more directories, subdirectories and
-/// symbolic links to directories.
-GLOBLIB_IMPL
-std::vector<std::filesystem::path> rglob(const glob::options& opts);
-
-/// Runs `glob` against each pathname in `pathnames` and accumulates the results
-GLOBLIB_IMPL
-std::vector<std::filesystem::path> glob(const std::vector<std::string> &pathnames);
-
-/// Runs `rglob` against each pathname in `pathnames` and accumulates the results
-GLOBLIB_IMPL
-std::vector<std::filesystem::path> rglob(const std::vector<std::string> &pathnames);
-
-/// Initializer list overload for convenience
-GLOBLIB_IMPL
-std::vector<std::filesystem::path>
-glob(const std::initializer_list<std::string> &pathnames);
-
-/// Initializer list overload for convenience
-GLOBLIB_IMPL
-std::vector<std::filesystem::path>
-rglob(const std::initializer_list<std::string> &pathnames);
 
 namespace {
 
@@ -255,6 +186,11 @@ bool has_magic(const std::string &pathname) {
   return std::regex_search(pathname, magic_check);
 }
 
+bool has_magic(const fs::path &path) {
+	auto pathname = path.string();
+	return has_magic(pathname);
+}
+
 constexpr bool is_hidden(std::string_view pathname) noexcept {
 	return pathname[0] == '.';
 }
@@ -294,12 +230,12 @@ std::vector<fs::path> iter_directory(const fs::path &dirname, bool dironly) {
 }
 
 // Recursively yields relative pathnames inside a literal directory.
-std::vector<fs::path> rlistdir(const fs::path &dirname, bool dironly, bool includehidden) {
+std::vector<fs::path> rlistdir(const fs::path &dirname, bool dironly) {
   std::vector<fs::path> result;
   //std::cout << "rlistdir: " << dirname.string() << "\n";
   auto names = iter_directory(dirname, dironly);
   for (auto &&name : names) {
-    if (includehidden || !is_hidden(name.filename().string())) {
+    if (!is_hidden(name.filename().string())) {
       result.push_back(name);
       auto matched_dirs = rlistdir(name, dironly);
       std::copy(std::make_move_iterator(matched_dirs.begin()), std::make_move_iterator(matched_dirs.end()), std::back_inserter(result));
@@ -330,7 +266,7 @@ std::vector<fs::path> glob1(const fs::path &dirname, const fs::path &pattern,
   std::vector<fs::path> filtered_names;
   auto names = iter_directory(dirname, dironly);
   for (auto &&name : names) {
-    if (includehidden || !is_hidden(name.filename().string())) {
+    if (!is_hidden(name.filename().string())) {
       filtered_names.push_back(name.filename());
       // if (name.is_relative()) {
       //   // std::cout << "Filtered (Relative): " << name << "\n";
@@ -416,6 +352,161 @@ std::vector<fs::path> glob(const std::string& pathname, bool recursive = false,
 	return glob(fs::path(pathname), recursive, dironly);
 }
 
+struct searchspec {
+	fs::path basepath;		// the non-wildcarded base
+	fs::path deep_spec;   // the rest of the searchspec; may contain wildcards
+};
+
+struct cached_options {
+	fs::path basepath;
+	std::vector<searchspec> searchpaths;
+	int searchpath_index = -1;
+	std::vector<std::string> error_msg;
+};
+
+bool glob_42(results &results, cached_options &cache, const options &search_spec) {
+	std::vector<fs::path> result;
+
+	// preparation / init phase
+	if (cache.searchpath_index < 0) {
+		cache.basepath = search_spec.basepath;
+		if (!cache.basepath.empty())
+			cache.basepath = expand_tilde(cache.basepath);
+
+		for (fs::path pn : search_spec.pathnames) {
+			pn = expand_tilde(pn);
+			if (pn.is_relative() && !cache.basepath.empty())
+				pn = cache.basepath / pn;
+
+			if (pn.empty()) {
+				pn = fs::current_path();
+			}
+
+			searchspec spec{
+				.basepath = "",
+				.deep_spec = pn
+			};
+			cache.searchpaths.push_back(spec);
+		}
+
+		results.basepath = cache.basepath;
+
+		cache.searchpath_index = 0;
+	}
+
+	if (cache.searchpath_index >= cache.searchpaths.size())
+		return false;
+
+	searchspec pathspec = cache.searchpaths[cache.searchpath_index];
+	try {
+		fs::path path = pathspec.deep_spec;
+
+		auto dirname = path.parent_path();
+		const auto basename = path.filename().string();
+
+		if (!has_magic(path)) {
+			path = pathspec.basepath / path;
+
+			if (!basename.empty() && fs::exists(path)) {
+				result.push_back(path);
+			}
+			// Patterns ending with a slash should match only directories
+			else if (basename.empty() && fs::is_directory(path)) {
+				result.push_back(path);
+			}
+		}
+		else
+		{
+			fs::path basepath = pathspec.basepath;
+			for (auto it = path.begin(); it != path.end(); ++it) {
+				fs::path elem = *it;
+				if (!has_magic(elem)) {
+					basepath /= elem;
+					continue;
+				}
+				bool recursive_scan_dirtree = is_recursive(elem.string());
+
+				bool has_subspec = (it != path.end());
+				fs::path sub_spec;
+				for (it++; it != path.end(); ++it) {
+					sub_spec /= *it;
+				}
+
+				// are we processing a '**' wildcard? If we do, we MAY also empty NIL, i.e. '**' matching exactly *nothing*:
+				// that's what we deal with right now:
+				if (recursive_scan_dirtree) {
+					if (has_subspec) {
+						// this effectively drops the '**' from the search path...
+						searchspec spec{
+						.basepath = basepath,
+						.deep_spec = sub_spec
+						};
+						cache.searchpaths.push_back(spec);
+					}
+					else
+					{
+						// when there's no further (possibly wildcarded) search spec following the '**', then we assume it is '/*', i.e.
+						//    /bla/**
+						// is assumed identical to
+						//    /bla/**/*
+						searchspec spec{
+						.basepath = basepath,
+						.deep_spec = "*"
+						};
+						cache.searchpaths.push_back(spec);
+					}
+				}
+
+				std::vector<fs::path> dirs_to_scan;
+				dirs_to_scan.push_back(basepath);
+
+				for (int index = 0; index < dirs_to_scan.size(); index++) {
+					fs::path dirpath = dirs_to_scan[index];
+
+					if (index > 100)
+						break;
+
+					for (auto &&entry : fs::directory_iterator(dirpath, fs::directory_options::follow_directory_symlink | fs::directory_options::skip_permission_denied)) {
+						fs::path ep = entry.path();
+						if (!is_hidden(ep.filename().string())) {
+							result.push_back(ep);
+						}
+						if (entry.is_directory()) {
+							if (has_subspec) {
+								searchspec spec{
+								.basepath = ep,
+								.deep_spec = sub_spec
+								};
+								cache.searchpaths.push_back(spec);
+							}
+							// are we processing a '**' wildcard?
+							if (recursive_scan_dirtree) {
+								dirs_to_scan.push_back(ep);
+							}
+						}
+					}
+				}
+
+				//auto fset = filter(filtered_names, elem.string());
+			}
+		}
+
+		for (const fs::path &entry : result) {
+			path_w_extattr ep(entry);
+			results.pathnames.push_back(ep);
+		}
+	}
+	catch (std::exception& ex) {
+		// not a directory
+		// do nothing
+		fs::path searchpath = pathspec.deep_spec / pathspec.deep_spec;
+		auto msg = std::format("{}: {}\n", searchpath.string(), ex.what());
+		cache.error_msg.push_back(msg);
+	}
+
+	return true;
+}
+
 } // namespace end
 
 
@@ -477,7 +568,7 @@ std::vector<fs::path> glob_path(const std::string& basepath, const std::vector<s
   std::vector<fs::path> result;
   for (auto& pathname : pathnames)
   {
-	for (auto& match : glob(fs::path(basepath) / pathname, false, false, opts.include_hidden_entries))
+	for (auto& match : glob(fs::path(basepath) / pathname, false))
 	{
 	  result.push_back(std::move(match));
 	}
@@ -499,13 +590,12 @@ std::vector<fs::path> rglob(const std::vector<std::string> &pathnames) {
 std::vector<fs::path> rglob_path(const std::string& basepath, const std::vector<std::string>& pathnames) {
   std::vector<fs::path> result;
   for (auto &pathname : pathnames) {
-    for (auto &match : glob(fs::path(basepath) / pathname, true, false, opts.include_hidden_entries)) {
+    for (auto &match : glob(fs::path(basepath) / pathname, true)) {
       result.push_back(std::move(match));
     }
   }
   return result;
 }
-
 
 
 /// Initializer list overload for convenience
@@ -529,6 +619,18 @@ std::vector<fs::path> rglob(const std::initializer_list<std::string> &pathnames)
 /// Initializer list overload for convenience
 std::vector<fs::path> rglob_path(const std::string& basepath, const std::initializer_list<std::string>& pathnames) {
     return rglob_path(basepath, std::vector<std::string>(pathnames));
+}
+
+
+results glob(const options &search_spec) {
+	results rv;
+	cached_options cache;
+
+	while (glob_42(rv, cache, search_spec)) {
+		cache.searchpath_index++;
+	}
+
+	return rv;
 }
 
 
