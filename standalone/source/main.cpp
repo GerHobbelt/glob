@@ -112,6 +112,8 @@ int main(int argc, const char** argv)
 	{
 		if (bfs_mode)
 		{
+#if 0
+			// simple implementation; see the #else branch for a more advanced usage of glob()
 			glob::options spec(basepath, patterns, recursive);
 
 			auto results = glob::glob(spec);
@@ -119,6 +121,41 @@ int main(int argc, const char** argv)
 			{
 				std::cout << match << "\n";
 			}
+#else
+			struct my_glob_cfg : public glob::options {
+				virtual filter_info_t filter(fs::path path, bool is_directory, filter_info_t glob_says_pass) override {
+					return glob_says_pass;
+				}
+
+				// progress callback: shows currently processed path, pass/reject status and progress/scan completion estimate.
+				// Return `false` to abort the glob action.
+				virtual bool progress_reporting(fs::path current_path, int depth, int item_count_scanned, int dir_count_scanned, int dir_count_todo) override {
+					return true;
+				}
+
+				// ------------
+
+				my_glob_cfg(const fs::path& basepath, std::vector<std::string> pathnames, bool recursive_search = true)
+					: glob::options(basepath, pathnames, recursive_search)
+				{
+				};
+				my_glob_cfg(const fs::path& basepath, const std::string& pathname, bool recursive_search = true)
+					: glob::options(basepath, pathname, recursive_search)
+				{
+					init_max_recursion_depth_set(recursive_search);
+				};
+
+				virtual ~my_glob_cfg() = default;
+			};
+
+			my_glob_cfg spec(basepath, patterns, recursive);
+
+			auto results = glob::glob(spec);
+			for (auto & match : results)
+			{
+				std::cout << match << "\n";
+			}
+#endif
 		}
 		else
 		{
