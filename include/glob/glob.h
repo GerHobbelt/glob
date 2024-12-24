@@ -2,6 +2,8 @@
 #pragma once
 #include <string>
 #include <vector>
+#include <functional>
+#include <any>
 
 #if !defined(GLOB_USE_GHC_FILESYSTEM) || defined(GHC_DO_NOT_USE_STD_FS)
 #if !__has_include(<filesystem>) || defined(GHC_DO_NOT_USE_STD_FS)
@@ -30,6 +32,14 @@
 
 #endif
 
+// https://stackoverflow.com/questions/1537964/visual-c-equivalent-of-gccs-attribute-packed
+
+#if defined(_MSC_VER)
+#define PACK( __Declaration__ ) __pragma(pack(push, 1)) __Declaration__ __pragma(pack(pop))
+#else // __GNUC__
+#define PACK( __Declaration__ ) __Declaration__ __attribute__((__packed__))
+#endif
+
 namespace glob {
 
 #if defined(GHC_USE_GHC_FS)
@@ -46,15 +56,41 @@ struct options {
 	std::vector<int> max_recursion_depth;  // -1 means: unlimited depth
 	bool include_hidden_entries = false;   // include files/directories which start with a '.' dot
 
-	// filter callback: returns pass/reject for given path
+	// --------------------------------------------------------------------------------------
+
+#if 0
+	// user-provided optional object that is passed around and can be used to track/memoize metadata related to the glob activity.
+	std::any user_obj;
+#endif
+
+	// rather than provide a bunch of std::function-based callbacks, we use virtual member functions, which the user can override in their overridden options class.
+	// This is done for performance reasons and to save space for the usual expected use cases. It also allows userland code to have easy access to userland-defined
+	// data and/or track/register additional glob metadata in any way they like, without having to revert to providing a somewhat-hacky std::any user object reference
+	// above...
+
+	PACK(struct filter_info_t {
+		bool accept: 1;					// false = reject, i.e. do not add to the result set.
+		bool recurse_into: 1;
+		int depth: 15;
+		int max_scan_depth: 15;
+	});
+	typedef struct filter_info_t filter_info_t;
+
+	// filter callback: returns pass/reject for given path; this can override the default glob reject/accept logic in either direction
+	// as both rejected and accepted entries are fed to this callback method.
+	virtual filter_info_t filter(fs::path path, bool is_directory, filter_info_t glob_says_pass);
 
 	// progress callback: shows currently processed path, pass/reject status and progress/scan completion estimate.
+	// Return `false` to abort the glob action.
+	virtual bool progress_reporting(fs::path current_path, int depth, int item_count_scanned, int dir_count_scanned, int dir_count_todo);
 
-	void init_max_recursion_depth_set(bool recursive_search = true)
+	// --------------------------------------------------------------------------------------
+
+	void init_max_recursion_depth_set(bool recursive_search = true, int default_search_depth = 1)
 	{
 		max_recursion_depth.resize(pathnames.size());
 		for (int index = 0; index < pathnames.size(); index++) {
-			max_recursion_depth[index] = (recursive_search ? -1 : 1);
+			max_recursion_depth[index] = (recursive_search ? -1 : default_search_depth);
 		}
 	};
 
@@ -73,43 +109,8 @@ struct options {
 	{
 		init_max_recursion_depth_set(recursive_search);
 	};
-};
 
-/// Helper struct for extended file/path attributes
-class path_w_extattr : public fs::path {
-public:
-	path_w_extattr(const fs::path &pathspec, int depth = 0, bool hidden = false):
-		fs::path(pathspec), path_depth_(depth), is_hidden_(hidden) {
-	}
-
-	path_w_extattr(const fs::path &&pathspec, int depth = 0, bool hidden = false) :
-		fs::path(pathspec), path_depth_(depth), is_hidden_(hidden) {
-	}
-
-	~path_w_extattr() = default;
-
-	bool is_hidden(void) const {
-		return is_hidden_;
-	}
-
-	int path_depth(void) const {
-		return path_depth_;
-	}
-
-protected:
-	bool is_hidden_ = false;
-
-	int path_depth_ = 0;
-};
-
-/// Helper struct for extended glob results' storage
-struct results {
-	std::vector<path_w_extattr> pathnames;
-};
-
-/// Helper struct for extended glob results' storage
-struct extended_results {
-	std::vector<std::unique_ptr<path_w_extattr>> pathnames;
+	virtual ~options() = default;
 };
 
 /// \param pathname string containing a path specification
@@ -170,8 +171,8 @@ std::vector<fs::path> rglob(const std::initializer_list<std::string> &pathnames)
 /// Initializer list overload for convenience
 std::vector<fs::path> rglob_path(const std::string& basepath, const std::initializer_list<std::string>& pathnames);
 
-template <class results>
-results glob(const options &search_specification);
+std::vector<fs::path> glob(const options &search_specification);
+std::vector<fs::path> glob(options &search_specification);
 
 /// Helper function: expand '~' HOME part (when used in the path) and normalize the given path.
 fs::path expand_and_normalize_tilde(fs::path path);

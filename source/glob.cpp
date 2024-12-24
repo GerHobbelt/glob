@@ -363,13 +363,12 @@ struct cached_options {
 	fs::path basepath;
 	std::vector<searchspec> searchpaths;
 	int searchpath_index = -1;
+
+	std::vector<fs::path> result_set;
 	std::vector<std::string> error_msg;
 };
 
-template <class results>
-bool glob_42(results &rv, cached_options &cache, const options &search_spec) {
-	std::vector<fs::path> result;
-
+bool glob_42(cached_options &cache, options &search_spec) {
 	// preparation / init phase
 	if (cache.searchpath_index < 0) {
 		cache.basepath = search_spec.basepath;
@@ -399,8 +398,6 @@ bool glob_42(results &rv, cached_options &cache, const options &search_spec) {
 			cache.searchpaths.push_back(spec);
 		}
 
-		//rv.basepath = cache.basepath;
-
 		cache.searchpath_index = 0;
 	}
 
@@ -421,11 +418,11 @@ bool glob_42(results &rv, cached_options &cache, const options &search_spec) {
 			path = pathspec.basepath / path;
 
 			if (!basename.empty() && fs::exists(path)) {
-				result.push_back(path);
+				cache.result_set.push_back(path);
 			}
 			// Patterns ending with a slash should match only directories
 			else if (basename.empty() && fs::is_directory(path)) {
-				result.push_back(path);
+				cache.result_set.push_back(path);
 			}
 		}
 		else
@@ -489,7 +486,7 @@ bool glob_42(results &rv, cached_options &cache, const options &search_spec) {
 					for (auto &&entry : fs::directory_iterator(dirpath, fs::directory_options::follow_directory_symlink | fs::directory_options::skip_permission_denied)) {
 						fs::path ep = entry.path();
 						if (!is_hidden(ep.filename().string())) {
-							result.push_back(ep);
+							cache.result_set.push_back(ep);
 						}
 						if (entry.is_directory()) {
 							if (has_subspec) {
@@ -513,12 +510,6 @@ bool glob_42(results &rv, cached_options &cache, const options &search_spec) {
 				//auto fset = filter(filtered_names, elem.string());
 			}
 		}
-
-		for (const fs::path &entry : result) {
-			//path_w_extattr ep(entry);
-			//rv.pathnames.push_back(ep);
-			rv.pathnames.push_back(entry);
-		}
 	}
 	catch (std::exception& ex) {
 		// not a directory
@@ -530,15 +521,6 @@ bool glob_42(results &rv, cached_options &cache, const options &search_spec) {
 
 	return true;
 }
-
-template
-bool glob_42<glob::results>(glob::results &rv, cached_options &cache, const options &search_spec);
-
-template <>
-bool glob_42<glob::extended_results>(glob::extended_results &rv, cached_options &cache, const options &search_spec) {
-	return false;
-}
-
 
 } // namespace end
 
@@ -655,30 +637,31 @@ std::vector<fs::path> rglob_path(const std::string& basepath, const std::initial
 }
 
 
-// explicit instantiations/specialization made available in this library:
-
-template<>
-results glob<results>(const options &search_spec) {
-	results rv;
-	cached_options cache;
-
-	while (glob_42<results>(rv, cache, search_spec)) {
-		cache.searchpath_index++;
-	}
-
-	return rv;
+std::vector<fs::path> glob(const options &search_spec) {
+	options spec(search_spec);
+	return glob(spec);
 }
 
-template<>
-extended_results glob<extended_results>(const options &search_spec) {
-	extended_results rv;
+std::vector<fs::path> glob(options &search_spec) {
 	cached_options cache;
 
-	while (glob_42<extended_results>(rv, cache, search_spec)) {
+	while (glob_42(cache, search_spec)) {
 		cache.searchpath_index++;
 	}
 
-	return {};  // TODO
+	return cache.result_set;
+}
+
+// filter callback: returns pass/reject for given path; this can override the default glob reject/accept logic in either direction
+// as both rejected and accepted entries are fed to this callback method.
+options::filter_info_t options::filter(fs::path path, bool is_directory, options::filter_info_t glob_says_pass) {
+	return glob_says_pass;
+}
+
+// progress callback: shows currently processed path, pass/reject status and progress/scan completion estimate.
+// Return `false` to abort the glob action.
+bool options::progress_reporting(fs::path current_path, int depth, int item_count_scanned, int dir_count_scanned, int dir_count_todo) {
+	return true;
 }
 
 

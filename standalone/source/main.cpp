@@ -114,8 +114,8 @@ int main(int argc, const char** argv)
 		{
 			glob::options spec(basepath, patterns, recursive);
 
-			glob::results results = glob::glob<glob::results>(spec);
-			for (glob::path_w_extattr& match : results.pathnames)
+			auto results = glob::glob(spec);
+			for (auto & match : results)
 			{
 				std::cout << match << "\n";
 			}
