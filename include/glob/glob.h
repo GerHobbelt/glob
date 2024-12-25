@@ -72,26 +72,44 @@ struct options {
 	// data and/or track/register additional glob metadata in any way they like, without having to revert to providing a somewhat-hacky std::any user object reference
 	// above...
 
-	PACK(struct filter_info_t {
+	PACK(struct filter_state_t {
 		bool accept: 1;								// false = reject, i.e. do not add to the result set.
 		bool recurse_into: 1;
 		bool stop_scan_for_this_spec: 1;
 		bool do_report_progress: 1;		// side-effect of the custom filter action: this provides a most flexible way to decide when and how often to invoke the progress reporting callback method.
-
-		unsigned int depth: 10;
-		unsigned int max_scan_depth: 10;
-
-		unsigned int search_spec_index: 8;
 	});
-	typedef struct filter_info_t filter_info_t;
+	typedef struct filter_state_t filter_state_t;
+
+	struct filter_info_t {
+		fs::path basepath;
+		fs::path filename;
+
+		fs::path matching_wildcarded_fragment;
+		fs::path subsearch_spec;
+
+		bool fragment_is_wildcarded;
+		bool fragment_is_double_star;
+
+		bool userland_may_override_accept;
+		bool userland_may_override_recurse_into;
+
+		bool is_directory;
+		bool is_hidden;
+
+		int depth;
+		int max_recursion_depth;
+
+		int search_spec_index;
+	};
 
 	// filter callback: returns pass/reject for given path; this can override the default glob reject/accept logic in either direction
 	// as both rejected and accepted entries are fed to this callback method.
-	virtual filter_info_t filter(fs::path path, bool is_directory, const filter_info_t glob_says_pass);
+	virtual filter_state_t filter(fs::path path, const filter_state_t glob_says_pass, const filter_info_t &info);
 
 	struct progress_info_t {
 		fs::path current_path;
 		filter_info_t path_filter_info;
+		filter_state_t path_filter_state;
 
 		int item_count_scanned;
 

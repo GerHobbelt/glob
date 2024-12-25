@@ -123,13 +123,13 @@ int main(int argc, const char** argv)
 			}
 #else
 			struct my_glob_cfg : public glob::options {
-				virtual filter_info_t filter(fs::path path, bool is_directory, filter_info_t glob_says_pass) override {
+				virtual filter_state_t filter(fs::path path, const filter_state_t glob_says_pass, const filter_info_t &info) override {
 					return glob_says_pass;
 				}
 
 				// progress callback: shows currently processed path, pass/reject status and progress/scan completion estimate.
 				// Return `false` to abort the glob action.
-				virtual bool progress_reporting(fs::path current_path, int depth, int item_count_scanned, int dir_count_scanned, int dir_count_todo) override {
+				virtual bool progress_reporting(const progress_info_t &info) override {
 					return true;
 				}
 
