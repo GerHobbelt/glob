@@ -143,7 +143,7 @@ foo@bar:~$ ./glob -i "**/**/*.hpp"
 "include/foo/bar.hpp"
 ```
 
-***NOTE*** If you run glob recursively, i.e., using `rglob`:
+***NOTE*** If you run glob recursively, using the `-r` CLI parameter, you are using the `rglob()` API under the hood:
 
 ```console
 foo@bar:~$ ./glob -r -i "**/*.hpp"
