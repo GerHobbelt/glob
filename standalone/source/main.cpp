@@ -12,8 +12,65 @@
 #include "monolithic_examples.h"
 
 
-static int test()
+static int test_wildcard_translate(void)
 {
+	int rv = EXIT_SUCCESS;
+
+	// https://www.man7.org/linux/man-pages/man7/glob.7.html, https://www.man7.org/linux/man-pages/man3/fnmatch.3.html et al.
+	std::vector<std::string> teststrings{
+		"~/a/b/" ">" R"(\~/a/b/)",
+		"ab*c" ">" "ab.*c",
+		"ab?c" ">" "ab.c",
+		"ab[1-9]" ">" "ab[1-9]",
+		"ab[--z]" ">" R"(ab[\--z])",
+		"ab[%--]" ">" R"(ab[%-\-])",
+		"ab[!1-9]" ">" "ab[^1-9]",
+		"ab[^1-9]" ">" R"(ab[\^1-9])",
+		"ab[a-]" ">" R"(ab[a\-])",
+		"ab[-a]" ">" R"(ab[\-a])",
+		"*.html" ">" R"(.*\.html)",
+		"[][!]" ">" R"([\]\[\!])",
+		"[A-Fa-f0-9]" ">" R"([A-Fa-f0-9])",
+		"[]-]" ">" R"([\]\-])",
+		"[!]a-]" ">" R"([^\]a\-])",
+		R"(a[[?*\])" ">" R"(a[\[\?\*\\])",
+		R"(b[[?*\\])" ">" R"(b[\[\?\*\\])",
+		"x(ab|cd|ef)" ">" R"(x\(ab\|cd\|ef\))",
+		"?(ab|cd|ef)" ">" R"((ab|cd|ef)?)",
+		"*(ab|cd|ef)" ">" R"((ab|cd|ef)*)",
+		"@(ab|cd|ef)" ">" R"((ab|cd|ef))",
+		"!(ab|cd|ef)" ">" R"((?!(ab|cd|ef)))",
+		"**" ">" ".*",
+	};
+	for (const auto& s : teststrings) {
+		size_t start = 0;
+		size_t end = s.find(">");
+		std::string src;
+		std::string dst;
+
+		if (end != std::string::npos) {
+			src = s.substr(start, end - start);
+			start = end + 1;
+			dst = "((" + s.substr(start) + R"()|[\r\n])$)";
+		}
+		else {
+			src = s;
+			dst = "((" + s + R"()|[\r\n])$)";
+		}
+
+		auto ist = glob::translate_pattern(src);
+		if (ist != dst) {
+			std::cerr << "ERROR: translate(\"" << src << "\") --> \"" << ist << "\" instead of expected: \"" << dst << "\"\n";
+			rv = EXIT_FAILURE;
+		}
+	}
+	return rv;
+}
+
+static int test(void)
+{
+	int rv = test_wildcard_translate();
+
 	std::vector<fs::path> testpaths{
 		"C:\\users\\abcdef\\AppData\\Local\\Temp\\",
 		"/home/user/.config/Cppcheck/Cppcheck-GUI.conf",
@@ -39,7 +96,7 @@ static int test()
 		std::cout << '\n';
 	}
 
-	return EXIT_SUCCESS;
+	return rv;
 }
 
 
@@ -162,6 +219,8 @@ int main(int argc, const char** argv)
 
 				virtual ~my_glob_cfg() = default;
 			};
+
+			(void)test_wildcard_translate();
 
 			my_glob_cfg spec(basepath, patterns, recursive);
 

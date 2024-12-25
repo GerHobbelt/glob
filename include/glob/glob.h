@@ -4,6 +4,8 @@
 #include <vector>
 #include <functional>
 #include <any>
+#include <regex>
+#include <string_view>
 
 #if !defined(GLOB_USE_GHC_FILESYSTEM) || defined(GHC_DO_NOT_USE_STD_FS)
 #if !__has_include(<filesystem>) || defined(GHC_DO_NOT_USE_STD_FS)
@@ -217,5 +219,12 @@ std::vector<fs::path> glob(options &search_specification);
 
 /// Helper function: expand '~' HOME part (when used in the path) and normalize the given path.
 fs::path expand_and_normalize_tilde(fs::path path);
+
+std::string translate_pattern(std::string_view pattern);
+std::regex compile_pattern(std::string_view pattern);
+bool fnmatch(std::string&& name,const std::regex& pattern);
+std::vector<fs::path> filter(const std::vector<fs::path> &names,std::string_view pattern);
+
+fs::path mk_relative(const fs::path& p,const fs::path& base);
 
 } // namespace glob

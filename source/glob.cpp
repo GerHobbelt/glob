@@ -136,28 +136,6 @@ namespace glob {
 			return std::string{"(("} + result_string + std::string{R"()|[\r\n])$)"};
 		}
 
-		std::regex compile_pattern(std::string_view pattern) {
-			return std::regex(translate(pattern), std::regex::ECMAScript);
-		}
-
-		bool fnmatch(std::string&& name, const std::regex& pattern) {
-			return std::regex_match(std::move(name), pattern);
-		}
-
-		std::vector<fs::path> filter(const std::vector<fs::path> &names,
-																 std::string_view pattern) {
-			// std::cout << "Pattern: " << pattern << "\n";
-			const auto pattern_re = compile_pattern(pattern);
-			std::vector<fs::path> result;
-			std::copy_if(std::make_move_iterator(names.begin()), std::make_move_iterator(names.end()),
-									 std::back_inserter(result),
-									 [&pattern_re](const fs::path& name) {
-												 // std::cout << "Checking for " << name.string() << "\n";
-												 return fnmatch(name.string(), pattern_re);
-						 });
-			return result;
-		}
-
 		fs::path expand_tilde(fs::path path) {
 			if (path.empty()) return path;
 
@@ -222,19 +200,6 @@ namespace glob {
 		bool is_recursive(const fs::path &path_element) noexcept {
 			std::string pattern = path_element.string();
 			return pattern == "**";
-		}
-
-		//
-		// hotfix because on MS Windows some path' symlinks throw a spanner in the woodworks by being expanded, e.g.
-		//
-		//    fs::relative("C:\\Users\\All Users", "C:\\Users") != "All Users"
-		// 
-		// but returns "..\\ProgramData" instead, and we don't want that, hence we get rid of the implicit weak_canonical() calls
-		// applied to either path:
-		//
-		fs::path mk_relative(const fs::path& p, const fs::path& base) {
-			//return weakly_canonical(p).lexically_relative(weakly_canonical(base));
-			return p.lexically_relative(base);
 		}
 
 		std::vector<fs::path> iter_directory(const fs::path &dirname, bool dironly) {
@@ -1003,6 +968,45 @@ namespace glob {
 
 	} // namespace end
 
+
+	//
+	// hotfix because on MS Windows some path' symlinks throw a spanner in the woodworks by being expanded, e.g.
+	//
+	//    fs::relative("C:\\Users\\All Users", "C:\\Users") != "All Users"
+	// 
+	// but returns "..\\ProgramData" instead, and we don't want that, hence we get rid of the implicit weak_canonical() calls
+	// applied to either path:
+	//
+	fs::path mk_relative(const fs::path& p, const fs::path& base) {
+		//return weakly_canonical(p).lexically_relative(weakly_canonical(base));
+		return p.lexically_relative(base);
+	}
+
+	std::string translate_pattern(std::string_view pattern) {
+		return translate(pattern);
+	}
+
+	std::regex compile_pattern(std::string_view pattern) {
+		return std::regex(translate(pattern), std::regex::ECMAScript);
+	}
+
+	bool fnmatch(std::string&& name, const std::regex& pattern) {
+		return std::regex_match(std::move(name), pattern);
+	}
+
+	std::vector<fs::path> filter(const std::vector<fs::path> &names,
+															 std::string_view pattern) {
+		// std::cout << "Pattern: " << pattern << "\n";
+		const auto pattern_re = compile_pattern(pattern);
+		std::vector<fs::path> result;
+		std::copy_if(std::make_move_iterator(names.begin()), std::make_move_iterator(names.end()),
+								 std::back_inserter(result),
+								 [&pattern_re](const fs::path& name) {
+								 // std::cout << "Checking for " << name.string() << "\n";
+								 return fnmatch(name.string(), pattern_re);
+					 });
+		return result;
+	}
 
 	/// \param pathname string containing a path specification
 	/// \return vector of paths that match the pathname
