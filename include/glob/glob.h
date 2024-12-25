@@ -54,7 +54,11 @@ struct options {
 	fs::path basepath;
 	std::vector<std::string> pathnames;		 // a set of paths to scan (MAY contain wildcards at both directory and file level, e.g. `/bla/**/sub*.dir/*` or `/bla/foo*.pdf`)
 	std::vector<int> max_recursion_depth;  // -1 means: unlimited depth
+
 	bool include_hidden_entries = false;   // include files/directories which start with a '.' dot
+	bool include_matching_directories = false;   // include directories which match the last wildcard, e.g. when searching for "*.pdf" match a directory named "collection.pdf/"
+	bool include_matching_files = true;          // include files which match the last wildcard, e.g. when searching for "*.pdf" match a file named "article.pdf"
+	bool follow_symlinks = true;
 
 	// --------------------------------------------------------------------------------------
 
@@ -69,20 +73,37 @@ struct options {
 	// above...
 
 	PACK(struct filter_info_t {
-		bool accept: 1;					// false = reject, i.e. do not add to the result set.
+		bool accept: 1;								// false = reject, i.e. do not add to the result set.
 		bool recurse_into: 1;
-		int depth: 15;
-		int max_scan_depth: 15;
+		bool stop_scan_for_this_spec: 1;
+		bool do_report_progress: 1;		// side-effect of the custom filter action: this provides a most flexible way to decide when and how often to invoke the progress reporting callback method.
+
+		unsigned int depth: 10;
+		unsigned int max_scan_depth: 10;
+
+		unsigned int search_spec_index: 8;
 	});
 	typedef struct filter_info_t filter_info_t;
 
 	// filter callback: returns pass/reject for given path; this can override the default glob reject/accept logic in either direction
 	// as both rejected and accepted entries are fed to this callback method.
-	virtual filter_info_t filter(fs::path path, bool is_directory, filter_info_t glob_says_pass);
+	virtual filter_info_t filter(fs::path path, bool is_directory, const filter_info_t glob_says_pass);
 
+	struct progress_info_t {
+		fs::path current_path;
+		filter_info_t path_filter_info;
+
+		int item_count_scanned;
+
+		int dir_count_scanned;
+		int dir_count_todo;
+
+		int searchpath_queue_index;
+		int searchpath_queue_size;
+	};
 	// progress callback: shows currently processed path, pass/reject status and progress/scan completion estimate.
 	// Return `false` to abort the glob action.
-	virtual bool progress_reporting(fs::path current_path, int depth, int item_count_scanned, int dir_count_scanned, int dir_count_todo);
+	virtual bool progress_reporting(const progress_info_t &info);
 
 	// --------------------------------------------------------------------------------------
 
