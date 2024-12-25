@@ -8,6 +8,8 @@
 #include <string_view>
 #include <format>
 
+#define DO_DEBUG  0
+
 namespace glob {
 
 	namespace {
@@ -397,6 +399,8 @@ namespace glob {
 
 			bool accepts_directories_only;		// when the search spec ended in a '/', that signaled the user only wishes to receive directory entries.
 
+			bool basepath_exists;							// flag/cache to help reduce the number of system calls during a scan: when `true`, we already know `fs::exists(basepath)` is true.
+
 			int actual_depth;
 			int max_recursion_depth;  // -1 means: unlimited depth
 
@@ -443,6 +447,7 @@ namespace glob {
 						.basepath = (is_rel ? cache.basepath : ""),
 						.deep_spec = pn,
 						.accepts_directories_only = basename.empty(),
+						.basepath_exists = false,
 						.actual_depth = 0,
 						.max_recursion_depth = max_depth,
 						.original_spec_index = index,
@@ -478,6 +483,13 @@ namespace glob {
 					else
 						cache.item_count_scanned++;
 
+					//if (!pathspec.basepath_exists + exists:?:deep_spec)
+					{
+						bool base_exists = fs::exists(path);
+						if (!base_exists)
+							return true;
+					}
+
 					options::filter_info_t fi{
 						.basepath = pathspec.basepath,
 						.filename = pathspec.deep_spec,
@@ -502,7 +514,7 @@ namespace glob {
 					// Note: patterns ending with a slash should match only directories.
 					options::filter_state_t fs{
 						.accept = (search_spec.include_hidden_entries || !fi.is_hidden) &&
-											(is_dir ? search_spec.include_matching_directories : search_spec.include_matching_files && !pathspec.accepts_directories_only && fs::exists(path)),
+											(is_dir ? search_spec.include_matching_directories : search_spec.include_matching_files && !pathspec.accepts_directories_only /* && fs::exists(path) */ ),
 						.recurse_into = false,
 						.stop_scan_for_this_spec = false,
 						.do_report_progress = false,
@@ -520,6 +532,7 @@ namespace glob {
 							.basepath = path,
 							.deep_spec = "*",
 							.accepts_directories_only = false,   // we drop this requirement here as the userland override has us going out of original scope already.
+							.basepath_exists = true,
 							.actual_depth = pathspec.actual_depth + 1,
 							.max_recursion_depth = pathspec.max_recursion_depth,
 							.original_spec_index = pathspec.original_spec_index,
@@ -534,9 +547,10 @@ namespace glob {
 							.path_filter_state = fs,
 							.item_count_scanned = cache.item_count_scanned,
 							.dir_count_scanned = cache.dir_count_scanned,
-							.dir_count_todo = 0,
 							.searchpath_queue_index = cache.searchpath_index,
-							.searchpath_queue_size = (int)cache.searchpaths.size(),
+							.searchpath_queue_count = (int)cache.searchpaths.size(),
+							.search_spec_index = cache.searchpath_index,
+							.search_spec_count = (int)cache.searchpaths.size(),
 						};
 						if (!search_spec.progress_reporting(pi))
 							return false;
@@ -556,6 +570,7 @@ namespace glob {
 						fs::path elem = *it;
 						if (!has_magic(elem)) {
 							basepath /= elem;
+							pathspec.basepath_exists = false;
 							continue;
 						}
 
@@ -564,6 +579,13 @@ namespace glob {
 						fs::path sub_spec;
 						for (it++; it != pathspec.deep_spec.end(); ++it) {
 							sub_spec /= *it;
+						}
+
+						if (!pathspec.basepath_exists)
+						{
+							bool base_exists = fs::exists(basepath);
+							if (!base_exists)
+								return true;
 						}
 
 						// are we processing a '**' wildcard? If we do, we MAY also match empty/NIL, i.e. '**' matching exactly *nothing*:
@@ -601,7 +623,7 @@ namespace glob {
 							options::filter_state_t fs{
 								.accept = (search_spec.include_hidden_entries || !fi.is_hidden) &&
 													sub_spec.empty() &&
-													(is_dir ? search_spec.include_matching_directories : search_spec.include_matching_files && !pathspec.accepts_directories_only && fs::exists(basepath)),
+													(is_dir ? search_spec.include_matching_directories : search_spec.include_matching_files && !pathspec.accepts_directories_only /* && fs::exists(basepath) */),
 								.recurse_into = is_dir,
 								.stop_scan_for_this_spec = false,
 								.do_report_progress = false,
@@ -619,6 +641,7 @@ namespace glob {
 										.basepath = basepath,
 										.deep_spec = sub_spec,
 										.accepts_directories_only = pathspec.accepts_directories_only,
+										.basepath_exists = true,
 										.actual_depth = pathspec.actual_depth,
 										.max_recursion_depth = pathspec.max_recursion_depth,
 										.original_spec_index = pathspec.original_spec_index,
@@ -634,6 +657,7 @@ namespace glob {
 										.basepath = basepath,
 										.deep_spec = (sub_spec.empty() ? "*" : sub_spec),
 										.accepts_directories_only = pathspec.accepts_directories_only,
+										.basepath_exists = true,
 										.actual_depth = pathspec.actual_depth,
 										.max_recursion_depth = pathspec.max_recursion_depth,
 										.original_spec_index = pathspec.original_spec_index,
@@ -649,9 +673,10 @@ namespace glob {
 									.path_filter_state = fs,
 									.item_count_scanned = cache.item_count_scanned,
 									.dir_count_scanned = cache.dir_count_scanned,
-									.dir_count_todo = 0,
 									.searchpath_queue_index = cache.searchpath_index,
-									.searchpath_queue_size = (int)cache.searchpaths.size(),
+									.searchpath_queue_count = (int)cache.searchpaths.size(),
+									.search_spec_index = cache.searchpath_index,
+									.search_spec_count = (int)cache.searchpaths.size(),
 								};
 								if (!search_spec.progress_reporting(pi))
 									return false;
@@ -663,19 +688,7 @@ namespace glob {
 
 							// now process the "**" element further: scan the current directory for any subdirectories and recurse into them.
 							// Do this recursively as "**" can match multiple levels of path hierarchy.
-							std::vector<fs::path> dirs_to_scan;
-							std::vector<int> dir_depths;
-							dirs_to_scan.push_back(basepath);
-							dir_depths.push_back(pathspec.actual_depth);
-
-							for (int index = 0; index < dirs_to_scan.size(); index++) {
-								fs::path dirpath = dirs_to_scan[index];
-								int dirdepth = dir_depths[index];
-
-								if (dirdepth > pathspec.max_recursion_depth)
-									continue;
-
-								for (auto &&entry : fs::directory_iterator(dirpath, fs::directory_options::follow_directory_symlink | fs::directory_options::skip_permission_denied)) {
+								for (auto &&entry : fs::directory_iterator(basepath, fs::directory_options::skip_permission_denied)) {
 									fs::path path = entry.path();
 
 									bool is_dir = fs::is_directory(path);
@@ -688,12 +701,14 @@ namespace glob {
 									if (!is_dir)
 										continue;
 
-									if (cache.item_count_scanned > 10000)
+#if DO_DEBUG
+									if (cache.item_count_scanned > 30000)
 										break;
+#endif
 
 									options::filter_info_t fi{
-										.basepath = dirpath,
-										.filename = mk_relative(path, dirpath),
+										.basepath = basepath,
+										.filename = mk_relative(path, basepath),
 
 										.matching_wildcarded_fragment = elem,
 										.subsearch_spec = sub_spec,
@@ -705,9 +720,9 @@ namespace glob {
 										.userland_may_override_recurse_into = true,
 
 										.is_directory = true,
-										.is_hidden = is_hidden(dirpath),
+										.is_hidden = is_hidden(basepath),
 
-										.depth = dirdepth + 1,
+										.depth = pathspec.actual_depth + 1,
 										.max_recursion_depth = pathspec.max_recursion_depth,
 
 										.search_spec_index = pathspec.original_spec_index
@@ -730,19 +745,31 @@ namespace glob {
 									//    /bla/**
 									// is assumed identical to
 									//    /bla/**/*
-									if (fs.recurse_into && is_dir && dirdepth < pathspec.max_recursion_depth) {
+									if (fs.recurse_into && is_dir && pathspec.actual_depth < pathspec.max_recursion_depth) {
+#if 0
 										searchspec spec{
 											.basepath = path,
 											.deep_spec = (sub_spec.empty() ? "*" : sub_spec),
 											.accepts_directories_only = pathspec.accepts_directories_only,
-											.actual_depth = dirdepth + 1,
+											.basepath_exists = true,
+											.actual_depth = pathspec.actual_depth + 1,
 											.max_recursion_depth = pathspec.max_recursion_depth,
 											.original_spec_index = pathspec.original_spec_index,
 										};
 										cache.searchpaths.push_back(spec);
+#endif
 
-										dirs_to_scan.push_back(path);
-										dir_depths.push_back(dirdepth + 1);
+										// also queue another level of "**" scanning in this subdirectory...
+										searchspec spec{
+											.basepath = path,
+											.deep_spec = elem / (sub_spec.empty() ? "*" : sub_spec),
+											.accepts_directories_only = pathspec.accepts_directories_only,
+											.basepath_exists = true,
+											.actual_depth = pathspec.actual_depth + 1,
+											.max_recursion_depth = pathspec.max_recursion_depth,
+											.original_spec_index = pathspec.original_spec_index,
+										};
+										cache.searchpaths.push_back(spec);
 									}
 
 									if (fs.do_report_progress) {
@@ -752,9 +779,10 @@ namespace glob {
 											.path_filter_state = fs,
 											.item_count_scanned = cache.item_count_scanned,
 											.dir_count_scanned = cache.dir_count_scanned,
-											.dir_count_todo = 0,
 											.searchpath_queue_index = cache.searchpath_index,
-											.searchpath_queue_size = (int)cache.searchpaths.size(),
+											.searchpath_queue_count = (int)cache.searchpaths.size(),
+											.search_spec_index = cache.searchpath_index,
+											.search_spec_count = (int)cache.searchpaths.size(),
 										};
 										if (!search_spec.progress_reporting(pi))
 											return false;
@@ -764,16 +792,17 @@ namespace glob {
 										return true;
 									}
 								}
-							}
 						} 
 						else {
 							assert(!recursive_scan_dirtree);
+
+							const auto pattern_re = compile_pattern(elem.string());
 
 							// we are NOT processing a '**' wildcard, but a (wildcarded) subspec instead, e.g. "*bla*/reutel.pdf" or "*ska*.mp3"...
 							if (!sub_spec.empty())
 							{
 								// scan wildcarded directory spec element, e.g. "*bla*/" in "*bla*/reutel.pdf", hence we will only accept matching directory names here.
-								for (auto &&entry : fs::directory_iterator(basepath, fs::directory_options::follow_directory_symlink | fs::directory_options::skip_permission_denied)) {
+								for (auto &&entry : fs::directory_iterator(basepath, fs::directory_options::skip_permission_denied)) {
 									fs::path path = entry.path();
 
 									bool is_dir = fs::is_directory(path);
@@ -786,12 +815,17 @@ namespace glob {
 									if (!is_dir)
 										continue;
 
-									if (cache.item_count_scanned > 10000)
+#if DO_DEBUG
+									if (cache.item_count_scanned > 30000)
 										break;
+#endif
+
+									auto relpath = mk_relative(path, basepath);
+									bool fn_match = fnmatch(relpath.string(), pattern_re);
 
 									options::filter_info_t fi{
 										.basepath = basepath,
-										.filename = mk_relative(path, basepath),
+										.filename = relpath,
 
 										.matching_wildcarded_fragment = elem,
 										.subsearch_spec = sub_spec,
@@ -811,9 +845,8 @@ namespace glob {
 										.search_spec_index = pathspec.original_spec_index
 									};
 									options::filter_state_t fs{
-										.accept = (search_spec.include_hidden_entries || !fi.is_hidden) &&
-															search_spec.include_matching_directories,
-										.recurse_into = true,
+										.accept = false,
+										.recurse_into = fn_match,
 										.stop_scan_for_this_spec = false,
 										.do_report_progress = false,
 									};
@@ -823,11 +856,12 @@ namespace glob {
 										cache.result_set.push_back(path);
 									}
 
-									if (fs.recurse_into && is_dir && pathspec.actual_depth < pathspec.max_recursion_depth) {
+									if (fs.recurse_into && pathspec.actual_depth < pathspec.max_recursion_depth) {
 										searchspec spec{
 											.basepath = path,
 											.deep_spec = sub_spec,
 											.accepts_directories_only = pathspec.accepts_directories_only,
+											.basepath_exists = true,
 											.actual_depth = pathspec.actual_depth + 1,
 											.max_recursion_depth = pathspec.max_recursion_depth,
 											.original_spec_index = pathspec.original_spec_index,
@@ -842,9 +876,10 @@ namespace glob {
 											.path_filter_state = fs,
 											.item_count_scanned = cache.item_count_scanned,
 											.dir_count_scanned = cache.dir_count_scanned,
-											.dir_count_todo = 0,
 											.searchpath_queue_index = cache.searchpath_index,
-											.searchpath_queue_size = (int)cache.searchpaths.size(),
+											.searchpath_queue_count = (int)cache.searchpaths.size(),
+											.search_spec_index = cache.searchpath_index,
+											.search_spec_count = (int)cache.searchpaths.size(),
 										};
 										if (!search_spec.progress_reporting(pi))
 											return false;
@@ -859,7 +894,7 @@ namespace glob {
 								// scan wildcarded filename spec element, e.g. "*ska*.mp3", hence we will accept both matching files and matching directory names here.
 								assert(sub_spec.empty());
 
-								for (auto &&entry : fs::directory_iterator(basepath, fs::directory_options::follow_directory_symlink | fs::directory_options::skip_permission_denied)) {
+								for (auto &&entry : fs::directory_iterator(basepath, fs::directory_options::skip_permission_denied)) {
 									fs::path path = entry.path();
 
 									bool is_dir = fs::is_directory(path);
@@ -869,12 +904,17 @@ namespace glob {
 									else
 										cache.item_count_scanned++;
 
-									if (cache.item_count_scanned > 10000)
+#if DO_DEBUG
+									if (cache.item_count_scanned > 30000)
 										break;
+#endif
+
+									auto relpath = mk_relative(path, basepath);
+									bool fn_match = fnmatch(relpath.string(), pattern_re);
 
 									options::filter_info_t fi{
 										.basepath = basepath,
-										.filename = mk_relative(path, basepath),
+										.filename = relpath,
 
 										.matching_wildcarded_fragment = elem,
 										.subsearch_spec = "",
@@ -895,8 +935,9 @@ namespace glob {
 									};
 									options::filter_state_t fs{
 										.accept = (search_spec.include_hidden_entries || !fi.is_hidden) &&
-															(is_dir ? search_spec.include_matching_directories : search_spec.include_matching_files /* && fs::exists(path) */),
-										.recurse_into = is_dir,
+															(is_dir ? search_spec.include_matching_directories : search_spec.include_matching_files && !pathspec.accepts_directories_only /* && fs::exists(path) */) &&
+															fn_match,
+										.recurse_into = false,
 										.stop_scan_for_this_spec = false,
 										.do_report_progress = false,
 									};
@@ -913,6 +954,7 @@ namespace glob {
 											.basepath = path,
 											.deep_spec = "*",
 											.accepts_directories_only = false,   // we drop this requirement here as the userland override has us going out of original scope already.
+											.basepath_exists = true,
 											.actual_depth = pathspec.actual_depth + 1,
 											.max_recursion_depth = pathspec.max_recursion_depth,
 											.original_spec_index = pathspec.original_spec_index,
@@ -927,9 +969,10 @@ namespace glob {
 											.path_filter_state = fs,
 											.item_count_scanned = cache.item_count_scanned,
 											.dir_count_scanned = cache.dir_count_scanned,
-											.dir_count_todo = 0,
 											.searchpath_queue_index = cache.searchpath_index,
-											.searchpath_queue_size = (int)cache.searchpaths.size(),
+											.searchpath_queue_count = (int)cache.searchpaths.size(),
+											.search_spec_index = cache.searchpath_index,
+											.search_spec_count = (int)cache.searchpaths.size(),
 										};
 										if (!search_spec.progress_reporting(pi))
 											return false;
@@ -1091,7 +1134,7 @@ namespace glob {
 
 	// filter callback: returns pass/reject for given path; this can override the default glob reject/accept logic in either direction
 	// as both rejected and accepted entries are fed to this callback method.
-	options::filter_state_t options::filter(fs::path path, const options::filter_state_t glob_says_pass, const options::filter_info_t &info) {
+	options::filter_state_t options::filter(fs::path path, options::filter_state_t glob_says_pass, const options::filter_info_t &info) {
 		return glob_says_pass;
 	}
 

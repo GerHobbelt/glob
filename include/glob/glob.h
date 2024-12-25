@@ -58,7 +58,8 @@ struct options {
 	bool include_hidden_entries = false;   // include files/directories which start with a '.' dot
 	bool include_matching_directories = false;   // include directories which match the last wildcard, e.g. when searching for "*.pdf" match a directory named "collection.pdf/"
 	bool include_matching_files = true;          // include files which match the last wildcard, e.g. when searching for "*.pdf" match a file named "article.pdf"
-	bool follow_symlinks = true;
+
+	//bool follow_symlinks = true;    <-- userland code can call fs::weak_canonical(path) on all entries instead.
 
 	// --------------------------------------------------------------------------------------
 
@@ -104,7 +105,7 @@ struct options {
 
 	// filter callback: returns pass/reject for given path; this can override the default glob reject/accept logic in either direction
 	// as both rejected and accepted entries are fed to this callback method.
-	virtual filter_state_t filter(fs::path path, const filter_state_t glob_says_pass, const filter_info_t &info);
+	virtual filter_state_t filter(fs::path path, filter_state_t glob_says_pass, const filter_info_t &info);
 
 	struct progress_info_t {
 		fs::path current_path;
@@ -112,12 +113,13 @@ struct options {
 		filter_state_t path_filter_state;
 
 		int item_count_scanned;
-
 		int dir_count_scanned;
-		int dir_count_todo;
 
 		int searchpath_queue_index;
-		int searchpath_queue_size;
+		int searchpath_queue_count;
+
+		int search_spec_index;
+		int search_spec_count;
 	};
 	// progress callback: shows currently processed path, pass/reject status and progress/scan completion estimate.
 	// Return `false` to abort the glob action.

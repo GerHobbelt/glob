@@ -122,14 +122,29 @@ int main(int argc, const char** argv)
 				std::cout << match << "\n";
 			}
 #else
-			struct my_glob_cfg : public glob::options {
-				virtual filter_state_t filter(fs::path path, const filter_state_t glob_says_pass, const filter_info_t &info) override {
+			class my_glob_cfg : public glob::options {
+				int previous_scan_depth = -1;
+				int previous_path_searched_index = -1;
+
+			public:
+				// rough demo of custom code which triggers progress reports while the glob() scan proceeds.
+				virtual filter_state_t filter(fs::path path, filter_state_t glob_says_pass, const filter_info_t &info) override {
+					if (info.depth != previous_scan_depth) {
+						previous_scan_depth = info.depth;
+						glob_says_pass.do_report_progress = true;
+					}
+					if (info.search_spec_index != previous_path_searched_index) {
+						previous_path_searched_index = info.search_spec_index;
+						glob_says_pass.do_report_progress = true;
+					}
+
 					return glob_says_pass;
 				}
 
 				// progress callback: shows currently processed path, pass/reject status and progress/scan completion estimate.
 				// Return `false` to abort the glob action.
 				virtual bool progress_reporting(const progress_info_t &info) override {
+					std::cout << info.search_spec_index << "/" << info.search_spec_count << ": " << info.current_path << "\n";
 					return true;
 				}
 
