@@ -85,7 +85,8 @@ struct options {
 
 	struct filter_info_t {
 		fs::path basepath;
-		fs::path filename;
+		fs::path item_relpath;
+		fs::directory_entry entry;
 
 		fs::path matching_wildcarded_fragment;
 		fs::path subsearch_spec;
@@ -93,7 +94,7 @@ struct options {
 		bool fragment_is_wildcarded;
 		bool fragment_is_double_star;
 
-		bool userland_may_override_accept;
+		//bool userland_may_override_accept = true;
 		bool userland_may_override_recurse_into;
 
 		bool is_directory;
@@ -102,30 +103,23 @@ struct options {
 		int depth;
 		int max_recursion_depth;
 
-		int search_spec_index;
+		int item_count_scanned;
+		int dir_count_scanned;
+
+		int original_search_spec_index;
+		int actual_search_spec_index;
+		int search_spec_count;
 	};
 
 	// filter callback: returns pass/reject for given path; this can override the default glob reject/accept logic in either direction
 	// as both rejected and accepted entries are fed to this callback method.
 	virtual filter_state_t filter(fs::path path, filter_state_t glob_says_pass, const filter_info_t &info);
 
-	struct progress_info_t {
-		fs::path current_path;
-		filter_info_t path_filter_info;
-		filter_state_t path_filter_state;
+	using progress_info_t = filter_info_t;
 
-		int item_count_scanned;
-		int dir_count_scanned;
-
-		int searchpath_queue_index;
-		int searchpath_queue_count;
-
-		int search_spec_index;
-		int search_spec_count;
-	};
 	// progress callback: shows currently processed path, pass/reject status and progress/scan completion estimate.
 	// Return `false` to abort the glob action.
-	virtual bool progress_reporting(const progress_info_t &info);
+	virtual bool progress_reporting(const progress_info_t &info, const filter_state_t state);
 
 	// --------------------------------------------------------------------------------------
 
@@ -219,6 +213,8 @@ std::vector<fs::path> glob(options &search_specification);
 
 /// Helper function: expand '~' HOME part (when used in the path) and normalize the given path.
 fs::path expand_and_normalize_tilde(fs::path path);
+
+bool follow_symlink(fs::directory_entry &entry);
 
 std::string translate_pattern(std::string_view pattern);
 std::regex compile_pattern(std::string_view pattern);

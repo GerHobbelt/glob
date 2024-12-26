@@ -7,6 +7,7 @@
 #include <regex>
 #include <string_view>
 #include <format>
+#include <unordered_set>
 
 #define DO_DEBUG  0
 
@@ -380,9 +381,58 @@ namespace glob {
 			int item_count_scanned = 0;
 			int dir_count_scanned = 0;
 
+			bool report_100pct_done_pending = true;
+
 			std::vector<fs::path> result_set;
 			std::vector<std::string> error_msg;
 		};
+
+		bool report_100_pct_done(cached_options &cache, options &search_spec) {
+			if (cache.report_100pct_done_pending) {
+				cache.report_100pct_done_pending = false;
+
+				// report progress @ 100% done:
+				options::filter_info_t fi{
+					.basepath = cache.basepath,
+					//.item_relpath = "",
+					//.entry = nil,
+
+					//.matching_wildcarded_fragment = "",
+					//.subsearch_spec = "",
+
+					.fragment_is_wildcarded = false,
+					.fragment_is_double_star = false,
+
+					//.userland_may_override_accept = true,
+					.userland_may_override_recurse_into = false,
+
+					.is_directory = false,
+					.is_hidden = false,
+
+					.depth = -1,
+					.max_recursion_depth = -1,
+
+					.item_count_scanned = cache.item_count_scanned,
+					.dir_count_scanned = cache.dir_count_scanned,
+
+					.original_search_spec_index = -1,
+					.actual_search_spec_index = (int)cache.searchpaths.size(),
+					.search_spec_count = (int)cache.searchpaths.size(),
+				};
+				options::filter_state_t fs{
+					.accept = false,
+					.recurse_into = false,
+					.stop_scan_for_this_spec = false,
+					.do_report_progress = true,
+				};
+
+				if (fs.do_report_progress) {
+					if (!search_spec.progress_reporting(fi, fs))
+						return false;
+				}
+			}
+			return false;
+		}
 
 		bool glob_42(cached_options &cache, options &search_spec) {
 			// preparation / init phase
@@ -423,11 +473,13 @@ namespace glob {
 				cache.item_count_scanned = 0;
 				cache.dir_count_scanned = 0;
 
+				cache.report_100pct_done_pending = true;
+
 				cache.searchpath_index = 0;
 			}
 
 			if (cache.searchpath_index >= cache.searchpaths.size())
-				return false;
+				return report_100_pct_done(cache, search_spec);
 
 			searchspec pathspec = cache.searchpaths[cache.searchpath_index];
 			if (pathspec.actual_depth > pathspec.max_recursion_depth)
@@ -441,13 +493,6 @@ namespace glob {
 
 					fs::path path = pathspec.basepath / pathspec.deep_spec;
 
-					bool is_dir = fs::is_directory(path);
-
-					if (is_dir)
-						cache.dir_count_scanned++;
-					else
-						cache.item_count_scanned++;
-
 					//if (!pathspec.basepath_exists + exists:?:deep_spec)
 					{
 						bool base_exists = fs::exists(path);
@@ -455,9 +500,19 @@ namespace glob {
 							return true;
 					}
 
+					fs::directory_entry entry(path);
+
+					bool is_dir = entry.is_directory();
+
+					if (is_dir)
+						cache.dir_count_scanned++;
+					else
+						cache.item_count_scanned++;
+
 					options::filter_info_t fi{
 						.basepath = pathspec.basepath,
-						.filename = pathspec.deep_spec,
+						.item_relpath = pathspec.deep_spec,
+						.entry = entry,
 
 						.matching_wildcarded_fragment = pathspec.deep_spec,
 						.subsearch_spec = "",
@@ -465,7 +520,7 @@ namespace glob {
 						.fragment_is_wildcarded = false,
 						.fragment_is_double_star = false,
 
-						.userland_may_override_accept = true,
+						//.userland_may_override_accept = true,
 						.userland_may_override_recurse_into = is_dir,
 
 						.is_directory = is_dir,
@@ -474,7 +529,12 @@ namespace glob {
 						.depth = pathspec.actual_depth,
 						.max_recursion_depth = pathspec.max_recursion_depth,
 
-						.search_spec_index = pathspec.original_spec_index
+						.item_count_scanned = cache.item_count_scanned,
+						.dir_count_scanned = cache.dir_count_scanned,
+
+						.original_search_spec_index = pathspec.original_spec_index,
+						.actual_search_spec_index = cache.searchpath_index,
+						.search_spec_count = (int)cache.searchpaths.size(),
 					};
 					// Note: patterns ending with a slash should match only directories.
 					options::filter_state_t fs{
@@ -506,18 +566,8 @@ namespace glob {
 					}
 
 					if (fs.do_report_progress) {
-						options::progress_info_t pi{
-							.current_path = path,
-							.path_filter_info = fi,
-							.path_filter_state = fs,
-							.item_count_scanned = cache.item_count_scanned,
-							.dir_count_scanned = cache.dir_count_scanned,
-							.searchpath_queue_index = cache.searchpath_index,
-							.searchpath_queue_count = (int)cache.searchpaths.size(),
-							.search_spec_index = cache.searchpath_index,
-							.search_spec_count = (int)cache.searchpaths.size(),
-						};
-						if (!search_spec.progress_reporting(pi))
+						//.current_path = path,
+						if (!search_spec.progress_reporting(fi, fs))
 							return false;
 					}
 
@@ -556,7 +606,8 @@ namespace glob {
 						// are we processing a '**' wildcard? If we do, we MAY also match empty/NIL, i.e. '**' matching exactly *nothing*:
 						// that's what we deal with right now.
 						if (recursive_scan_dirtree) {
-							bool is_dir = fs::is_directory(basepath);
+							fs::directory_entry entry(basepath);
+							bool is_dir = entry.is_directory();
 
 							if (is_dir)
 								cache.dir_count_scanned++;
@@ -565,7 +616,8 @@ namespace glob {
 
 							options::filter_info_t fi{
 								.basepath = basepath,
-								.filename = "",
+								.item_relpath = "",
+								.entry = entry,
 
 								.matching_wildcarded_fragment = elem,
 								.subsearch_spec = sub_spec,
@@ -573,7 +625,7 @@ namespace glob {
 								.fragment_is_wildcarded = true,
 								.fragment_is_double_star = true,
 
-								.userland_may_override_accept = true,
+								//.userland_may_override_accept = true,
 								.userland_may_override_recurse_into = is_dir,
 
 								.is_directory = is_dir,
@@ -582,7 +634,12 @@ namespace glob {
 								.depth = pathspec.actual_depth,
 								.max_recursion_depth = pathspec.max_recursion_depth,
 
-								.search_spec_index = pathspec.original_spec_index
+								.item_count_scanned = cache.item_count_scanned,
+								.dir_count_scanned = cache.dir_count_scanned,
+
+								.original_search_spec_index = pathspec.original_spec_index,
+								.actual_search_spec_index = cache.searchpath_index,
+								.search_spec_count = (int)cache.searchpaths.size(),
 							};
 							// Note: patterns ending with a slash should match only directories.
 							options::filter_state_t fs{
@@ -632,18 +689,8 @@ namespace glob {
 							}
 
 							if (fs.do_report_progress) {
-								options::progress_info_t pi{
-									.current_path = basepath,
-									.path_filter_info = fi,
-									.path_filter_state = fs,
-									.item_count_scanned = cache.item_count_scanned,
-									.dir_count_scanned = cache.dir_count_scanned,
-									.searchpath_queue_index = cache.searchpath_index,
-									.searchpath_queue_count = (int)cache.searchpaths.size(),
-									.search_spec_index = cache.searchpath_index,
-									.search_spec_count = (int)cache.searchpaths.size(),
-								};
-								if (!search_spec.progress_reporting(pi))
+								//.current_path = basepath,
+								if (!search_spec.progress_reporting(fi, fs))
 									return false;
 							}
 
@@ -656,7 +703,7 @@ namespace glob {
 								for (auto &&entry : fs::directory_iterator(basepath, fs::directory_options::skip_permission_denied)) {
 									fs::path path = entry.path();
 
-									bool is_dir = fs::is_directory(path);
+									bool is_dir = entry.is_directory();
 
 									if (is_dir)
 										cache.dir_count_scanned++;
@@ -673,7 +720,8 @@ namespace glob {
 
 									options::filter_info_t fi{
 										.basepath = basepath,
-										.filename = mk_relative(path, basepath),
+										.item_relpath = mk_relative(path, basepath),
+										.entry = entry,
 
 										.matching_wildcarded_fragment = elem,
 										.subsearch_spec = sub_spec,
@@ -681,7 +729,7 @@ namespace glob {
 										.fragment_is_wildcarded = true,
 										.fragment_is_double_star = true,
 
-										.userland_may_override_accept = false,
+										//.userland_may_override_accept = false,
 										.userland_may_override_recurse_into = true,
 
 										.is_directory = true,
@@ -690,7 +738,12 @@ namespace glob {
 										.depth = pathspec.actual_depth + 1,
 										.max_recursion_depth = pathspec.max_recursion_depth,
 
-										.search_spec_index = pathspec.original_spec_index
+										.item_count_scanned = cache.item_count_scanned,
+										.dir_count_scanned = cache.dir_count_scanned,
+
+										.original_search_spec_index = pathspec.original_spec_index,
+										.actual_search_spec_index = cache.searchpath_index,
+										.search_spec_count = (int)cache.searchpaths.size(),
 									};
 									options::filter_state_t fs{
 										.accept = (search_spec.include_hidden_entries || !fi.is_hidden) &&
@@ -738,18 +791,8 @@ namespace glob {
 									}
 
 									if (fs.do_report_progress) {
-										options::progress_info_t pi{
-											.current_path = path,
-											.path_filter_info = fi,
-											.path_filter_state = fs,
-											.item_count_scanned = cache.item_count_scanned,
-											.dir_count_scanned = cache.dir_count_scanned,
-											.searchpath_queue_index = cache.searchpath_index,
-											.searchpath_queue_count = (int)cache.searchpaths.size(),
-											.search_spec_index = cache.searchpath_index,
-											.search_spec_count = (int)cache.searchpaths.size(),
-										};
-										if (!search_spec.progress_reporting(pi))
+										//.current_path = path,
+										if (!search_spec.progress_reporting(fi, fs))
 											return false;
 									}
 
@@ -770,7 +813,7 @@ namespace glob {
 								for (auto &&entry : fs::directory_iterator(basepath, fs::directory_options::skip_permission_denied)) {
 									fs::path path = entry.path();
 
-									bool is_dir = fs::is_directory(path);
+									bool is_dir = entry.is_directory();
 
 									if (is_dir)
 										cache.dir_count_scanned++;
@@ -790,7 +833,8 @@ namespace glob {
 
 									options::filter_info_t fi{
 										.basepath = basepath,
-										.filename = relpath,
+										.item_relpath = relpath,
+										.entry = entry,
 
 										.matching_wildcarded_fragment = elem,
 										.subsearch_spec = sub_spec,
@@ -798,7 +842,7 @@ namespace glob {
 										.fragment_is_wildcarded = true,
 										.fragment_is_double_star = false,
 
-										.userland_may_override_accept = true,
+										//.userland_may_override_accept = true,
 										.userland_may_override_recurse_into = true,
 
 										.is_directory = true,
@@ -807,7 +851,12 @@ namespace glob {
 										.depth = pathspec.actual_depth + 1,
 										.max_recursion_depth = pathspec.max_recursion_depth,
 
-										.search_spec_index = pathspec.original_spec_index
+										.item_count_scanned = cache.item_count_scanned,
+										.dir_count_scanned = cache.dir_count_scanned,
+
+										.original_search_spec_index = pathspec.original_spec_index,
+										.actual_search_spec_index = cache.searchpath_index,
+										.search_spec_count = (int)cache.searchpaths.size(),
 									};
 									options::filter_state_t fs{
 										.accept = false,
@@ -835,18 +884,8 @@ namespace glob {
 									}
 
 									if (fs.do_report_progress) {
-										options::progress_info_t pi{
-											.current_path = path,
-											.path_filter_info = fi,
-											.path_filter_state = fs,
-											.item_count_scanned = cache.item_count_scanned,
-											.dir_count_scanned = cache.dir_count_scanned,
-											.searchpath_queue_index = cache.searchpath_index,
-											.searchpath_queue_count = (int)cache.searchpaths.size(),
-											.search_spec_index = cache.searchpath_index,
-											.search_spec_count = (int)cache.searchpaths.size(),
-										};
-										if (!search_spec.progress_reporting(pi))
+										//.current_path = path,
+										if (!search_spec.progress_reporting(fi, fs))
 											return false;
 									}
 
@@ -862,7 +901,7 @@ namespace glob {
 								for (auto &&entry : fs::directory_iterator(basepath, fs::directory_options::skip_permission_denied)) {
 									fs::path path = entry.path();
 
-									bool is_dir = fs::is_directory(path);
+									bool is_dir = entry.is_directory();
 
 									if (is_dir)
 										cache.dir_count_scanned++;
@@ -879,7 +918,8 @@ namespace glob {
 
 									options::filter_info_t fi{
 										.basepath = basepath,
-										.filename = relpath,
+										.item_relpath = relpath,
+										.entry = entry,
 
 										.matching_wildcarded_fragment = elem,
 										.subsearch_spec = "",
@@ -887,7 +927,7 @@ namespace glob {
 										.fragment_is_wildcarded = true,
 										.fragment_is_double_star = false,
 
-										.userland_may_override_accept = true,
+										//.userland_may_override_accept = true,
 										.userland_may_override_recurse_into = is_dir,
 
 										.is_directory = is_dir,
@@ -896,7 +936,12 @@ namespace glob {
 										.depth = pathspec.actual_depth,
 										.max_recursion_depth = pathspec.max_recursion_depth,
 
-										.search_spec_index = pathspec.original_spec_index
+										.item_count_scanned = cache.item_count_scanned,
+										.dir_count_scanned = cache.dir_count_scanned,
+
+										.original_search_spec_index = pathspec.original_spec_index,
+										.actual_search_spec_index = cache.searchpath_index,
+										.search_spec_count = (int)cache.searchpaths.size(),
 									};
 									options::filter_state_t fs{
 										.accept = (search_spec.include_hidden_entries || !fi.is_hidden) &&
@@ -928,18 +973,8 @@ namespace glob {
 									}
 
 									if (fs.do_report_progress) {
-										options::progress_info_t pi{
-											.current_path = path,
-											.path_filter_info = fi,
-											.path_filter_state = fs,
-											.item_count_scanned = cache.item_count_scanned,
-											.dir_count_scanned = cache.dir_count_scanned,
-											.searchpath_queue_index = cache.searchpath_index,
-											.searchpath_queue_count = (int)cache.searchpaths.size(),
-											.search_spec_index = cache.searchpath_index,
-											.search_spec_count = (int)cache.searchpaths.size(),
-										};
-										if (!search_spec.progress_reporting(pi))
+										//.current_path = path,
+										if (!search_spec.progress_reporting(fi, fs))
 											return false;
 									}
 
@@ -1144,7 +1179,7 @@ namespace glob {
 
 	// progress callback: shows currently processed path, pass/reject status and progress/scan completion estimate.
 	// Return `false` to abort the glob action.
-	bool options::progress_reporting(const progress_info_t &info) {
+	bool options::progress_reporting(const progress_info_t &info, const filter_state_t state) {
 		return true;
 	}
 
@@ -1153,6 +1188,49 @@ namespace glob {
 	fs::path expand_and_normalize_tilde(fs::path path) {
 		path = expand_tilde(path);
 		return path.lexically_normal();
+	}
+
+	namespace {
+
+		struct SLHash {
+			size_t operator() (const fs::path &p) const {
+				std::string_view temp{p.string()};
+				size_t h = temp.size() ^ 0x01425F;
+				for (auto i = temp.cbegin(); i != temp.cend(); i++) {
+					auto c = *i;
+					h ^= 143 * c;
+					h += h >> 9;
+				}
+				return h;
+			}
+		};
+
+		struct SLKeyCompare {
+			bool operator() (fs::path const& lhs, fs::path const& rhs) const {
+				return lhs == rhs;
+			}
+		};
+
+	}
+
+	bool follow_symlink(fs::directory_entry &entry) {
+		if (entry.exists() && entry.is_symlink()) {
+			// prevent symlink loops from locking up the loop:
+			std::unordered_set<fs::path, SLHash, SLKeyCompare> symlink_loop_detector;
+			symlink_loop_detector.insert(entry.path());
+			do {
+				auto new_path = fs::read_symlink(entry.path());
+				if (symlink_loop_detector.contains(new_path)) {
+					// symlink loop detected! abort!
+					break;
+				}
+				symlink_loop_detector.insert(new_path);
+				entry.assign(new_path);
+				entry.refresh();
+			} while (entry.is_symlink());
+			return true;
+		}
+		return false;
 	}
 
 } // namespace glob
