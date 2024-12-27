@@ -12,6 +12,8 @@
 
 #include <ghc/fs_std.hpp>  // namespace fs = std::filesystem;   or   namespace fs = ghc::filesystem;
 
+#include "monolithic_examples.h"
+
 // https://stackoverflow.com/questions/13772567/how-to-get-the-cpu-cycle-count-in-x86-64-from-c
 // https://stackoverflow.com/questions/19719617/comparing-the-time-measured-results-produced-by-rdtsc-clock-and-c11-stdchron
 
