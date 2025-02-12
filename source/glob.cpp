@@ -19,6 +19,19 @@ namespace glob {
 		static const auto ESCAPE_SET_OPER = std::regex(std::string{R"([&~|])"});
 		static const auto ESCAPE_REPL_STR = std::string{R"(\\\1)"};
 
+		// SPECIAL_CHARS
+		// closing ')', '}' and ']'
+		// '-' (a range in character set)
+		// '&', '~', (extended character set operations)
+		// '#' (comment) and WHITESPACE (ignored) in verbose mode
+		static const std::map<int,std::string> special_characters_map = []() {
+			std::map<int,std::string> ch_map;
+			for(auto &&sc : SPECIAL_CHARACTERS) {
+				ch_map.emplace(static_cast<int>(sc),std::string{"\\"} + std::string(1,sc));
+			}
+			return ch_map;
+		}();
+
 		bool string_replace(std::string &str, std::string_view from, std::string_view to) {
 			std::size_t start_pos = str.find(from);
 			if (start_pos == std::string::npos)
@@ -114,20 +127,8 @@ namespace glob {
 					}
 				} 
 				else {
-					// SPECIAL_CHARS
-					// closing ')', '}' and ']'
-					// '-' (a range in character set)
-					// '&', '~', (extended character set operations)
-					// '#' (comment) and WHITESPACE (ignored) in verbose mode
-					static std::map<int, std::string> special_characters_map;
-					if (special_characters_map.empty()) {
-						for (auto &&sc : SPECIAL_CHARACTERS) {
-							special_characters_map.emplace(static_cast<int>(sc), std::string{"\\"} + std::string(1, sc));
-						}
-					}
-
 					if (SPECIAL_CHARACTERS.find(c) != std::string_view::npos) {
-						result_string += special_characters_map[static_cast<int>(c)];
+						result_string += special_characters_map.at(static_cast<int>(c));
 					} 
 					else {
 						result_string += c;
