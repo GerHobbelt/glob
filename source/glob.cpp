@@ -141,7 +141,47 @@ namespace glob {
 		fs::path expand_tilde(fs::path path) {
 			if (path.empty()) return path;
 
+<<<<<<< HEAD
 			auto firstdirname = *(path.begin());
+=======
+bool fnmatch(std::string&& name, const std::regex& pattern) {
+  return std::regex_match(std::move(name), pattern);
+}
+
+std::vector<fs::path> filter(const std::vector<fs::path> &names,
+                             std::string_view pattern) {
+  // std::cout << "Pattern: " << pattern << "\n";
+  const auto pattern_re = compile_pattern(pattern);
+  std::vector<fs::path> result;
+  std::copy_if(std::make_move_iterator(names.begin()), std::make_move_iterator(names.end()),
+               std::back_inserter(result),
+               [&pattern_re](const fs::path& name) { return fnmatch(name.string(), pattern_re); });
+  return result;
+}
+
+#ifdef _WIN32
+#include <cstdlib>
+
+inline std::string get_env(const char* var) {
+    char* buffer = nullptr;
+    size_t size = 0;
+    if (_dupenv_s(&buffer, &size, var) == 0 && buffer != nullptr) {
+        std::string result(buffer);
+        free(buffer);
+        return result;
+    }
+    return {};
+}
+#else
+inline std::string get_env(const char* var) {
+    const char* value = std::getenv(var);
+    return value ? std::string(value) : "";
+}
+#endif
+
+fs::path expand_tilde(fs::path path) {
+  if (path.empty()) return path;
+>>>>>>> remotes/p-ranav-original/master
 
 			if (path.is_relative() && firstdirname == "~") {
 				// expand tilde, when it's at the start of the (relative) path.
@@ -161,6 +201,7 @@ namespace glob {
 					throw std::invalid_argument("error: Unable to expand `~` - HOME environment variable not set.");
 				}
 #endif
+<<<<<<< HEAD
 
 				std::string s = path.string();
 				s = std::string{home} + s.substr(1, s.size() - 1);
@@ -171,6 +212,13 @@ namespace glob {
 			}
 			return path;
 		}
+=======
+  std::string home = get_env(home_variable);
+  
+  if (home.empty()) {
+      throw std::invalid_argument("error: Unable to expand `~` - HOME environment variable not set.");
+  }
+>>>>>>> remotes/p-ranav-original/master
 
 		bool has_magic(const std::string &pathname) {
 			static const auto magic_check = std::regex("([*?[])");

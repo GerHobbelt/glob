@@ -164,6 +164,27 @@ std::vector<fs::path> filter(const std::vector<fs::path> &names,
   return result;
 }
 
+#ifdef _WIN32
+#include <cstdlib>
+
+inline std::string get_env(const char* var) {
+  char* buffer = nullptr;
+  size_t size = 0;
+  if (_dupenv_s(&buffer, &size, var) == 0 && buffer != nullptr) {
+    std::string result(buffer);
+    free(buffer);
+    return result;
+  }
+  return {};
+}
+#else
+inline std::string get_env(const char* var) {
+    const char* value = std::getenv(var);
+    return value ? std::string(value) : "";
+}
+#endif
+
+
 static inline 
 fs::path expand_tilde(fs::path path) {
   if (path.empty()) return path;
@@ -171,30 +192,25 @@ fs::path expand_tilde(fs::path path) {
   auto firstdirname = *(path.begin());
 
   if (path.is_relative() && firstdirname == "~") {
-	  // expand tilde, when it's at the start of the (relative) path.
+	// expand tilde, when it's at the start of the (relative) path.
 #ifdef _WIN32
-	  char* home;
-	  size_t sz;
-	  errno_t err = _dupenv_s(&home, &sz, "USERPROFILE");
-	  if (home == nullptr) {
-		  err = _dupenv_s(&home, &sz, "HOME");
-		  if (home == nullptr) {
-			  throw std::invalid_argument("error: Unable to expand `~` - neither USERPROFILE nor HOME environment variables are set.");
-		  }
-	  }
+	std::string home = get_env("USERPROFILE");
+	if (home.empty()) {
+		std::string home = get_env("HOME");
+		if (home.empty()) {
+			throw std::invalid_argument("error: Unable to expand `~` - neither USERPROFILE nor HOME environment variables are set.");
+		}
+	}
 #else
-	  const char* home = std::getenv("HOME");
-	  if (home == nullptr) {
-		  throw std::invalid_argument("error: Unable to expand `~` - HOME environment variable not set.");
-	  }
+	std::string home = get_env("HOME");
+	if (home.empty()) {
+		throw std::invalid_argument("error: Unable to expand `~` - HOME environment variable not set.");
+	}
 #endif
 
-	  std::string s = path.string();
+	std::string s = path.string();
     s = std::string{home} + s.substr(1, s.size() - 1);
-#ifdef _WIN32
-	  free(home);
-#endif
-	  return fs::path(s).lexically_normal();
+	return fs::path(s).lexically_normal();
   }
   return path;
 }
