@@ -5,13 +5,9 @@
 #include <gtest/gtest.h>
 #include <stdlib.h>
 
-#ifdef USE_SINGLE_HEADER
-#include "glob/glob.hpp"
-#else
 #include "glob/glob.h"
-#endif
 
-namespace fs = std::filesystem;
+//namespace fs = std::filesystem;
 
 fs::path mkdir_temp() {
   std::srand(std::time(nullptr));
@@ -105,4 +101,17 @@ TEST_F(RecursiveCurrentDirectoryTest, TerminalRecursivePatternIncludesBase) {
   EXPECT_EQ(sorted_paths(glob::rglob("sub/**")),
             sorted_paths({"sub/", "sub/root.txt", "sub/nested", "sub/nested/deep.txt"}));
   EXPECT_TRUE(glob::rglob("missing/**").empty());
+}
+
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main      rglob_test_main
+#endif
+
+extern "C"
+/* GTEST_API_ */ int main(int argc,const char** argv) {
+    printf("Running main() from %s\n", __FILE__);
+    testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
 }
