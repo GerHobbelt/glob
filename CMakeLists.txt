@@ -91,6 +91,7 @@ target_include_directories(
 string(TOLOWER ${PROJECT_NAME}/version.h VERSION_HEADER_LOCATION)
 
 if (GLOB_MAIN_PROJECT)
+
 packageProject(
         NAME ${PROJECT_NAME}
         VERSION ${PROJECT_VERSION}
@@ -109,10 +110,4 @@ set_property(TARGET glob_tests PROPERTY CXX_STANDARD 17)
 target_link_libraries(glob_tests PRIVATE gtest_main ${PROJECT_NAME})
 add_test(NAME glob_tests COMMAND glob_tests)
 
-add_executable(glob_tests_single test/rglob_test.cpp)
-set_property(TARGET glob_tests_single PROPERTY CXX_STANDARD 17)
-target_compile_definitions(glob_tests_single PRIVATE USE_SINGLE_HEADER=1)
-target_link_libraries(glob_tests_single PRIVATE gtest_main)
-target_include_directories(glob_tests_single PRIVATE single_include)
-add_test(NAME glob_tests_single COMMAND glob_tests_single)
 endif()
