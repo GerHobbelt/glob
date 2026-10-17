@@ -7,20 +7,192 @@
 #include <regex>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 
-#ifdef GLOB_USE_GHC_FILESYSTEM
-#include <ghc/filesystem.hpp>
+#if !defined(GLOB_USE_GHC_FILESYSTEM) || defined(GHC_DO_NOT_USE_STD_FS)
+#if !__has_include(<filesystem>) || defined(GHC_DO_NOT_USE_STD_FS)
+#define GLOB_USE_GHC_FILESYSTEM   1
+#ifndef GHC_DO_NOT_USE_STD_FS
+#define GHC_DO_NOT_USE_STD_FS     1
+#endif
+#endif
 #else
-#include <filesystem>
+#define GHC_DO_NOT_USE_STD_FS     1
+#endif
+
+// to prevent mishaps, use the GHC-provided filesystem selector headerfile: ghc/fs_std.hpp
+// which listens to both system availability of std::filesystem and the GHC_DO_NOT_USE_STD_FS
+// overriding switch/define.
+// 
+// This GHC headerfile also outputs a GHC_USE_GHC_FS define when ghc::filesystem has been loaded instead of std::filesystem.
+//
+#include <ghc/fs_std.hpp>  // namespace fs = std::filesystem;   or   namespace fs = ghc::filesystem;
+
+// https://stackoverflow.com/questions/1537964/visual-c-equivalent-of-gccs-attribute-packed
+
+#if defined(_MSC_VER)
+#define PACK( __Declaration__ ) __pragma(pack(push, 1)) __Declaration__ __pragma(pack(pop))
+#else // __GNUC__
+#define PACK( __Declaration__ ) __Declaration__ __attribute__((__packed__))
 #endif
 
 namespace glob {
 
-#ifdef GLOB_USE_GHC_FILESYSTEM
+#if defined(GHC_USE_GHC_FS)
 namespace fs = ghc::filesystem;
 #else
 namespace fs = std::filesystem;
 #endif
+
+
+/// Helper struct for extended options
+struct options {
+	fs::path basepath;
+	std::vector<std::string> pathnames;		 // a set of paths to scan (MAY contain wildcards at both directory and file level, e.g. `/bla/**/sub*.dir/*` or `/bla/foo*.pdf`)
+	std::vector<int> max_recursion_depth;  // -1 means: unlimited depth
+
+	bool include_hidden_entries = false;   // include files/directories which start with a '.' dot
+	bool include_matching_directories = false;   // include directories which match the last wildcard, e.g. when searching for "*.pdf" match a directory named "collection.pdf/"
+	bool include_matching_files = true;          // include files which match the last wildcard, e.g. when searching for "*.pdf" match a file named "article.pdf"
+
+	//bool follow_symlinks = true;    <-- userland code can call fs::weak_canonical(path) on all entries instead.
+
+	// --------------------------------------------------------------------------------------
+
+#if 0
+	// user-provided optional object that is passed around and can be used to track/memoize metadata related to the glob activity.
+	std::any user_obj;
+#endif
+
+	// rather than provide a bunch of std::function-based callbacks, we use virtual member functions, which the user can override in their overridden options class.
+	// This is done for performance reasons and to save space for the usual expected use cases. It also allows userland code to have easy access to userland-defined
+	// data and/or track/register additional glob metadata in any way they like, without having to revert to providing a somewhat-hacky std::any user object reference
+	// above...
+
+	PACK(struct filter_state_t {
+		bool accept: 1;								// false = reject, i.e. do not add to the result set.
+		bool recurse_into: 1;
+		bool stop_scan_for_this_spec: 1;
+		bool do_report_progress: 1;		// side-effect of the custom filter action: this provides a most flexible way to decide when and how often to invoke the progress reporting callback method.
+	});
+	typedef struct filter_state_t filter_state_t;
+
+	struct filter_info_t {
+		fs::path basepath;
+		fs::path item_relpath;
+		fs::directory_entry entry;
+
+		fs::path matching_wildcarded_fragment;
+		fs::path subsearch_spec;
+
+		bool fragment_is_wildcarded;
+		bool fragment_is_double_star;
+
+		//bool userland_may_override_accept = true;
+		bool userland_may_override_recurse_into;
+
+		bool is_directory;
+		bool is_hidden;
+
+		int depth;
+		int max_recursion_depth;
+
+		int item_count_scanned;
+		int dir_count_scanned;
+
+		int original_search_spec_index;
+		int actual_search_spec_index;
+		int search_spec_count;
+	};
+
+	// filter callback: returns pass/reject for given path; this can override the default glob reject/accept logic in either direction
+	// as both rejected and accepted entries are fed to this callback method.
+	virtual filter_state_t filter(fs::path path, filter_state_t glob_says_pass, const filter_info_t &info);
+
+	using progress_info_t = filter_info_t;
+
+	// progress callback: shows currently processed path, pass/reject status and progress/scan completion estimate.
+	// Return `false` to abort the glob action.
+	virtual bool progress_reporting(const progress_info_t &info, const filter_state_t state);
+
+	// --------------------------------------------------------------------------------------
+
+	void init_max_recursion_depth_set(bool recursive_search = true, int default_search_depth = 1)
+	{
+		max_recursion_depth.resize(pathnames.size());
+		for (int index = 0; index < pathnames.size(); index++) {
+			max_recursion_depth[index] = (recursive_search ? -1 : default_search_depth);
+		}
+	};
+
+	options(const fs::path& basepath, std::vector<std::string> pathnames, bool recursive_search = true)
+		: basepath(basepath),
+		pathnames(pathnames)
+	{
+		init_max_recursion_depth_set(recursive_search);
+	};
+	/// \param basepath the root directory to run in
+	/// \param pathname string containing a path specification
+	/// Convenience constructor for use when only a single pathspec will be used
+	options(const fs::path& basepath, const std::string& pathname, bool recursive_search = true)
+		: basepath(basepath),
+		pathnames({pathname})
+	{
+		init_max_recursion_depth_set(recursive_search);
+	};
+
+	virtual ~options() = default;
+};
+
+
+//
+// hotfix because on MS Windows some path' symlinks throw a spanner in the woodworks by being expanded, e.g.
+//
+//    fs::relative("C:\\Users\\All Users", "C:\\Users") != "All Users"
+// 
+// but returns "..\\ProgramData" instead, and we don't want that, hence we get rid of the implicit weak_canonical() calls
+// applied to either path:
+//
+static inline
+fs::path mk_relative(const fs::path& p,const fs::path& base) {
+	//return weakly_canonical(p).lexically_relative(weakly_canonical(base));
+	return p.lexically_relative(base);
+}
+
+// forward decl...
+static inline
+std::string translate(std::string_view pattern);
+
+static inline
+std::string translate_pattern(std::string_view pattern) {
+	return translate(pattern);
+}
+
+static inline
+std::regex compile_pattern(std::string_view pattern) {
+	return std::regex(translate(pattern),std::regex::ECMAScript);
+}
+
+static inline
+bool fnmatch(std::string&& name,const std::regex& pattern) {
+	return std::regex_match(std::move(name),pattern);
+}
+
+static inline
+std::vector<fs::path> filter(const std::vector<fs::path> &names,
+														 std::string_view pattern) {
+	// std::cout << "Pattern: " << pattern << "\n";
+	const auto pattern_re = compile_pattern(pattern);
+	std::vector<fs::path> result;
+	std::copy_if(std::make_move_iterator(names.begin()),std::make_move_iterator(names.end()),
+							 std::back_inserter(result),
+							 [&pattern_re](const fs::path& name) {
+		// std::cout << "Checking for " << name.string() << "\n";
+		return fnmatch(name.string(),pattern_re);
+	});
+	return result;
+}
+
 
 namespace {
 
@@ -167,6 +339,7 @@ std::vector<fs::path> filter(const std::vector<fs::path> &names,
 #ifdef _WIN32
 #include <cstdlib>
 
+static 
 inline std::string get_env(const char* var) {
   char* buffer = nullptr;
   size_t size = 0;
@@ -178,6 +351,7 @@ inline std::string get_env(const char* var) {
   return {};
 }
 #else
+static 
 inline std::string get_env(const char* var) {
     const char* value = std::getenv(var);
     return value ? std::string(value) : "";
@@ -191,30 +365,25 @@ fs::path expand_tilde(fs::path path) {
   auto firstdirname = *(path.begin());
 
   if (path.is_relative() && firstdirname == "~") {
-	  // expand tilde, when it's at the start of the (relative) path.
+	// expand tilde, when it's at the start of the (relative) path.
 #ifdef _WIN32
-	  char* home;
-	  size_t sz;
-	  errno_t err = _dupenv_s(&home, &sz, "USERPROFILE");
-	  if (home == nullptr) {
-		  err = _dupenv_s(&home, &sz, "HOME");
-		  if (home == nullptr) {
-			  throw std::invalid_argument("error: Unable to expand `~` - neither USERPROFILE nor HOME environment variables are set.");
-		  }
-	  }
+	std::string home = get_env("USERPROFILE");
+	if (home.empty()) {
+		std::string home = get_env("HOME");
+		if (home.empty()) {
+			throw std::invalid_argument("error: Unable to expand `~` - neither USERPROFILE nor HOME environment variables are set.");
+		}
+	}
 #else
-	  const char* home = std::getenv("HOME");
-	  if (home == nullptr) {
-		  throw std::invalid_argument("error: Unable to expand `~` - HOME environment variable not set.");
-	  }
+	std::string home = get_env("HOME");
+	if (home.empty()) {
+		throw std::invalid_argument("error: Unable to expand `~` - HOME environment variable not set.");
+	}
 #endif
 
-	  std::string s = path.string();
+	std::string s = path.string();
     s = std::string{home} + s.substr(1, s.size() - 1);
-#ifdef _WIN32
-	  free(home);
-#endif
-	  return fs::path(s).lexically_normal();
+	return fs::path(s).lexically_normal();
   }
   return path;
 }
@@ -226,14 +395,37 @@ bool has_magic(const std::string &pathname) {
 }
 
 static inline 
+bool has_magic(const fs::path &path) {
+	auto pathname = path.string();
+	return has_magic(pathname);
+}
+
+static inline 
 constexpr bool is_hidden(std::string_view pathname) noexcept {
     //return std::regex_match(pathname, std::regex("^(.*\\/)*\\.[^\\.\\/]+\\/*$"));
 	return pathname[0] == '.';
 }
 
 static inline 
+bool is_hidden(const fs::path &path) noexcept {
+	std::string pathname = path.filename().string();
+	return pathname[0] == '.';
+}
+
+static inline 
 constexpr bool is_recursive(std::string_view pattern) noexcept {
 	return pattern == std::string_view{"**"};
+}
+
+static inline 
+constexpr bool is_recursive(const std::string &pattern) noexcept {
+	return pattern == "**";
+}
+
+static inline 
+bool is_recursive(const fs::path &path_element) noexcept {
+	std::string pattern = path_element.string();
+	return pattern == "**";
 }
 
 static inline 
@@ -274,7 +466,7 @@ std::vector<fs::path> rlistdir(const fs::path &dirname, bool dironly) {
   //std::cout << "rlistdir: " << dirname.string() << "\n";
   auto names = iter_directory(dirname, dironly);
   for (auto &&name : names) {
-    if (!is_hidden(name.string())) {
+    if (!is_hidden(name)) {
       result.push_back(name);
       auto matched_dirs = rlistdir(name, dironly);
       std::copy(std::make_move_iterator(matched_dirs.begin()), std::make_move_iterator(matched_dirs.end()), std::back_inserter(result));
@@ -295,7 +487,7 @@ std::vector<fs::path> glob2(const fs::path &dirname, [[maybe_unused]] const fs::
   if (fs::exists(current_directory)) {
     result.push_back(".");
   }
-  assert(is_recursive(pattern.string()));
+  assert(is_recursive(pattern));
   auto matched_dirs = rlistdir(dirname, dironly);
   std::copy(std::make_move_iterator(matched_dirs.begin()), std::make_move_iterator(matched_dirs.end()), std::back_inserter(result));
   return result;
@@ -311,7 +503,7 @@ std::vector<fs::path> glob1(const fs::path &dirname, const fs::path &pattern,
   std::vector<fs::path> filtered_names;
   auto names = iter_directory(dirname, dironly);
   for (auto &&name : names) {
-    if (!is_hidden(name.string())) {
+    if (!is_hidden(name)) {
       filtered_names.push_back(name.filename());
       // if (name.is_relative()) {
       //   // std::cout << "Filtered (Relative): " << name << "\n";
@@ -325,6 +517,7 @@ std::vector<fs::path> glob1(const fs::path &dirname, const fs::path &pattern,
   return filter(filtered_names, pattern.string());
 }
 
+static inline 
 std::vector<fs::path> glob0(const fs::path &dirname, const fs::path &basename,
                             bool /*dironly*/) {
   // std::cout << "In glob0\n";
@@ -397,6 +590,635 @@ static inline
 std::vector<fs::path> glob(const std::string& pathname, bool recursive = false,
 	bool dironly = false) {
 	return glob(fs::path(pathname), recursive, dironly);
+}
+
+struct searchspec {
+	fs::path basepath;		// the non-wildcarded base
+	fs::path deep_spec;   // the rest of the searchspec; may contain wildcards
+
+	bool accepts_directories_only;		// when the search spec ended in a '/', that signaled the user only wishes to receive directory entries.
+
+	bool basepath_exists;							// flag/cache to help reduce the number of system calls during a scan: when `true`, we already know `fs::exists(basepath)` is true.
+
+	int actual_depth;
+	int max_recursion_depth;  // -1 means: unlimited depth
+
+	int original_spec_index;
+};
+
+struct cached_options {
+	fs::path basepath;
+	std::vector<searchspec> searchpaths;
+	int searchpath_index = -1;
+
+	int item_count_scanned = 0;
+	int dir_count_scanned = 0;
+
+	bool report_100pct_done_pending = true;
+
+	std::vector<fs::path> result_set;
+	std::vector<std::string> error_msg;
+};
+
+static inline 
+bool report_100_pct_done(cached_options &cache, options &search_spec) {
+	if (cache.report_100pct_done_pending) {
+		cache.report_100pct_done_pending = false;
+
+		// report progress @ 100% done:
+		options::filter_info_t fi{
+			.basepath = cache.basepath,
+			//.item_relpath = "",
+			//.entry = nil,
+
+			//.matching_wildcarded_fragment = "",
+			//.subsearch_spec = "",
+
+			.fragment_is_wildcarded = false,
+			.fragment_is_double_star = false,
+
+			//.userland_may_override_accept = true,
+			.userland_may_override_recurse_into = false,
+
+			.is_directory = false,
+			.is_hidden = false,
+
+			.depth = -1,
+			.max_recursion_depth = -1,
+
+			.item_count_scanned = cache.item_count_scanned,
+			.dir_count_scanned = cache.dir_count_scanned,
+
+			.original_search_spec_index = -1,
+			.actual_search_spec_index = (int)cache.searchpaths.size(),
+			.search_spec_count = (int)cache.searchpaths.size(),
+		};
+		options::filter_state_t fs{
+			.accept = false,
+			.recurse_into = false,
+			.stop_scan_for_this_spec = false,
+			.do_report_progress = true,
+		};
+
+		if (fs.do_report_progress) {
+			if (!search_spec.progress_reporting(fi, fs))
+				return false;
+		}
+	}
+	return false;
+}
+
+static inline 
+bool glob_42(cached_options &cache, options &search_spec) {
+	// preparation / init phase
+	if (cache.searchpath_index < 0) {
+		cache.basepath = search_spec.basepath;
+		if (!cache.basepath.empty())
+			cache.basepath = expand_tilde(cache.basepath);
+
+		for (int index = 0; index < search_spec.pathnames.size(); index++) {
+			fs::path pn = search_spec.pathnames[index];
+			pn = expand_tilde(pn);
+			bool is_rel = pn.is_relative();
+
+			if (pn.empty()) {
+				pn = fs::current_path();
+				is_rel = false;
+			}
+
+			int max_depth = search_spec.max_recursion_depth[index];
+			if (max_depth < 0)
+				max_depth = INT_MAX;
+
+			// help detect whether the search spec ended with an '/' or equivalent directory separator:
+			const auto basename = pn.filename().string();
+
+			searchspec spec{
+				.basepath = (is_rel ? cache.basepath : ""),
+				.deep_spec = pn,
+				.accepts_directories_only = basename.empty(),
+				.basepath_exists = false,
+				.actual_depth = 0,
+				.max_recursion_depth = max_depth,
+				.original_spec_index = index,
+			};
+			cache.searchpaths.push_back(spec);
+		}
+
+		cache.item_count_scanned = 0;
+		cache.dir_count_scanned = 0;
+
+		cache.report_100pct_done_pending = true;
+
+		cache.searchpath_index = 0;
+	}
+
+	if (cache.searchpath_index >= cache.searchpaths.size())
+		return report_100_pct_done(cache, search_spec);
+
+	searchspec pathspec = cache.searchpaths[cache.searchpath_index];
+	if (pathspec.actual_depth > pathspec.max_recursion_depth)
+		return true;
+
+	try {
+		assert(!pathspec.deep_spec.empty());
+
+		if (!has_magic(pathspec.deep_spec)) {
+			assert(!has_magic(pathspec.basepath));
+
+			fs::path path = pathspec.basepath / pathspec.deep_spec;
+
+			//if (!pathspec.basepath_exists + exists:?:deep_spec)
+			{
+				bool base_exists = fs::exists(path);
+				if (!base_exists)
+					return true;
+			}
+
+			fs::directory_entry entry(path);
+
+			bool is_dir = entry.is_directory();
+
+			if (is_dir)
+				cache.dir_count_scanned++;
+			else
+				cache.item_count_scanned++;
+
+			options::filter_info_t fi{
+				.basepath = pathspec.basepath,
+				.item_relpath = pathspec.deep_spec,
+				.entry = entry,
+
+				.matching_wildcarded_fragment = pathspec.deep_spec,
+				.subsearch_spec = "",
+
+				.fragment_is_wildcarded = false,
+				.fragment_is_double_star = false,
+
+				//.userland_may_override_accept = true,
+				.userland_may_override_recurse_into = is_dir,
+
+				.is_directory = is_dir,
+				.is_hidden = is_hidden(path),
+
+				.depth = pathspec.actual_depth,
+				.max_recursion_depth = pathspec.max_recursion_depth,
+
+				.item_count_scanned = cache.item_count_scanned,
+				.dir_count_scanned = cache.dir_count_scanned,
+
+				.original_search_spec_index = pathspec.original_spec_index,
+				.actual_search_spec_index = cache.searchpath_index,
+				.search_spec_count = (int)cache.searchpaths.size(),
+			};
+			// Note: patterns ending with a slash should match only directories.
+			options::filter_state_t fs{
+				.accept = (search_spec.include_hidden_entries || !fi.is_hidden) &&
+									(is_dir ? search_spec.include_matching_directories : search_spec.include_matching_files && !pathspec.accepts_directories_only /* && fs::exists(path) */ ),
+				.recurse_into = false,
+				.stop_scan_for_this_spec = false,
+				.do_report_progress = false,
+			};
+			fs = search_spec.filter(path, fs, fi);
+
+			if (fs.accept) {
+				cache.result_set.push_back(path);
+			}
+
+			// Note: we do accept a 'recurse_info' override by userland filter here anyway, while the original search spec didn't mandate/suppose that sort of thing.
+			// Userland overrides work both ways...
+			if (fs.recurse_into && is_dir && pathspec.actual_depth < pathspec.max_recursion_depth) {
+				searchspec spec{
+					.basepath = path,
+					.deep_spec = "*",
+					.accepts_directories_only = false,   // we drop this requirement here as the userland override has us going out of original scope already.
+					.basepath_exists = true,
+					.actual_depth = pathspec.actual_depth + 1,
+					.max_recursion_depth = pathspec.max_recursion_depth,
+					.original_spec_index = pathspec.original_spec_index,
+				};
+				cache.searchpaths.push_back(spec);
+			}
+
+			if (fs.do_report_progress) {
+				//.current_path = path,
+				if (!search_spec.progress_reporting(fi, fs))
+					return false;
+			}
+
+			if (fs.stop_scan_for_this_spec) {
+				return true;
+			}
+		} 
+		else {
+			assert(!pathspec.deep_spec.empty());
+			assert(has_magic(pathspec.deep_spec));
+
+			fs::path basepath = pathspec.basepath;
+
+			for (auto it = pathspec.deep_spec.begin(); /* it != pathspec.deep_spec.end() */; ++it) {
+				fs::path elem = *it;
+				if (!has_magic(elem)) {
+					basepath /= elem;
+					pathspec.basepath_exists = false;
+					continue;
+				}
+
+				bool recursive_scan_dirtree = is_recursive(elem);
+
+				fs::path sub_spec;
+				for (it++; it != pathspec.deep_spec.end(); ++it) {
+					sub_spec /= *it;
+				}
+
+				if (!pathspec.basepath_exists)
+				{
+					bool base_exists = fs::exists(basepath);
+					if (!base_exists)
+						return true;
+				}
+
+				// are we processing a '**' wildcard? If we do, we MAY also match empty/NIL, i.e. '**' matching exactly *nothing*:
+				// that's what we deal with right now.
+				if (recursive_scan_dirtree) {
+					fs::directory_entry entry(basepath);
+					bool is_dir = entry.is_directory();
+
+					if (is_dir)
+						cache.dir_count_scanned++;
+					else
+						cache.item_count_scanned++;
+
+					options::filter_info_t fi{
+						.basepath = basepath,
+						.item_relpath = "",
+						.entry = entry,
+
+						.matching_wildcarded_fragment = elem,
+						.subsearch_spec = sub_spec,
+
+						.fragment_is_wildcarded = true,
+						.fragment_is_double_star = true,
+
+						//.userland_may_override_accept = true,
+						.userland_may_override_recurse_into = is_dir,
+
+						.is_directory = is_dir,
+						.is_hidden = is_hidden(basepath),
+
+						.depth = pathspec.actual_depth,
+						.max_recursion_depth = pathspec.max_recursion_depth,
+
+						.item_count_scanned = cache.item_count_scanned,
+						.dir_count_scanned = cache.dir_count_scanned,
+
+						.original_search_spec_index = pathspec.original_spec_index,
+						.actual_search_spec_index = cache.searchpath_index,
+						.search_spec_count = (int)cache.searchpaths.size(),
+					};
+					// Note: patterns ending with a slash should match only directories.
+					options::filter_state_t fs{
+						.accept = (search_spec.include_hidden_entries || !fi.is_hidden) &&
+											sub_spec.empty() &&
+											(is_dir ? search_spec.include_matching_directories : search_spec.include_matching_files && !pathspec.accepts_directories_only /* && fs::exists(basepath) */),
+						.recurse_into = is_dir,
+						.stop_scan_for_this_spec = false,
+						.do_report_progress = false,
+					};
+					fs = search_spec.filter(basepath, fs, fi);
+
+					if (fs.accept) {
+						cache.result_set.push_back(basepath);
+					}
+
+					if (fs.recurse_into && is_dir) {
+						if (!sub_spec.empty()) {
+							// this effectively drops the '**' from the search path...
+							searchspec spec{
+								.basepath = basepath,
+								.deep_spec = sub_spec,
+								.accepts_directories_only = pathspec.accepts_directories_only,
+								.basepath_exists = true,
+								.actual_depth = pathspec.actual_depth,
+								.max_recursion_depth = pathspec.max_recursion_depth,
+								.original_spec_index = pathspec.original_spec_index,
+							};
+							cache.searchpaths.push_back(spec);
+						} 
+						else {
+							// when there's no further (possibly wildcarded) search spec following the '**', then we assume it is '/*', i.e.
+							//    /bla/**
+							// is assumed identical to
+							//    /bla/**/*
+							searchspec spec{
+								.basepath = basepath,
+								.deep_spec = (sub_spec.empty() ? "*" : sub_spec),
+								.accepts_directories_only = pathspec.accepts_directories_only,
+								.basepath_exists = true,
+								.actual_depth = pathspec.actual_depth,
+								.max_recursion_depth = pathspec.max_recursion_depth,
+								.original_spec_index = pathspec.original_spec_index,
+							};
+							cache.searchpaths.push_back(spec);
+						}
+					}
+
+					if (fs.do_report_progress) {
+						//.current_path = basepath,
+						if (!search_spec.progress_reporting(fi, fs))
+							return false;
+					}
+
+					if (fs.stop_scan_for_this_spec) {
+						return true;
+					}
+
+					// now process the "**" element further: scan the current directory for any subdirectories and recurse into them.
+					// Do this recursively as "**" can match multiple levels of path hierarchy.
+						for (auto &&entry : fs::directory_iterator(basepath, fs::directory_options::skip_permission_denied)) {
+							fs::path path = entry.path();
+
+							bool is_dir = entry.is_directory();
+
+							if (is_dir)
+								cache.dir_count_scanned++;
+							else
+								cache.item_count_scanned++;
+
+							if (!is_dir)
+								continue;
+
+							options::filter_info_t fi{
+								.basepath = basepath,
+								.item_relpath = mk_relative(path, basepath),
+								.entry = entry,
+
+								.matching_wildcarded_fragment = elem,
+								.subsearch_spec = sub_spec,
+
+								.fragment_is_wildcarded = true,
+								.fragment_is_double_star = true,
+
+								//.userland_may_override_accept = false,
+								.userland_may_override_recurse_into = true,
+
+								.is_directory = true,
+								.is_hidden = is_hidden(basepath),
+
+								.depth = pathspec.actual_depth + 1,
+								.max_recursion_depth = pathspec.max_recursion_depth,
+
+								.item_count_scanned = cache.item_count_scanned,
+								.dir_count_scanned = cache.dir_count_scanned,
+
+								.original_search_spec_index = pathspec.original_spec_index,
+								.actual_search_spec_index = cache.searchpath_index,
+								.search_spec_count = (int)cache.searchpaths.size(),
+							};
+							options::filter_state_t fs{
+								.accept = (search_spec.include_hidden_entries || !fi.is_hidden) &&
+													sub_spec.empty() &&
+													search_spec.include_matching_directories,
+								.recurse_into = true,
+								.stop_scan_for_this_spec = false,
+								.do_report_progress = false,
+							};
+							fs = search_spec.filter(path, fs, fi);
+
+							if (fs.accept) {
+								cache.result_set.push_back(path);
+							}
+
+							// when there's no further (possibly wildcarded) search spec following the '**', then we assume it is '/*', i.e.
+							//    /bla/**
+							// is assumed identical to
+							//    /bla/**/*
+							if (fs.recurse_into && is_dir && pathspec.actual_depth < pathspec.max_recursion_depth) {
+#if 0
+								searchspec spec{
+									.basepath = path,
+									.deep_spec = (sub_spec.empty() ? "*" : sub_spec),
+									.accepts_directories_only = pathspec.accepts_directories_only,
+									.basepath_exists = true,
+									.actual_depth = pathspec.actual_depth + 1,
+									.max_recursion_depth = pathspec.max_recursion_depth,
+									.original_spec_index = pathspec.original_spec_index,
+								};
+								cache.searchpaths.push_back(spec);
+#endif
+
+								// also queue another level of "**" scanning in this subdirectory...
+								searchspec spec{
+									.basepath = path,
+									.deep_spec = elem / (sub_spec.empty() ? "*" : sub_spec),
+									.accepts_directories_only = pathspec.accepts_directories_only,
+									.basepath_exists = true,
+									.actual_depth = pathspec.actual_depth + 1,
+									.max_recursion_depth = pathspec.max_recursion_depth,
+									.original_spec_index = pathspec.original_spec_index,
+								};
+								cache.searchpaths.push_back(spec);
+							}
+
+							if (fs.do_report_progress) {
+								//.current_path = path,
+								if (!search_spec.progress_reporting(fi, fs))
+									return false;
+							}
+
+							if (fs.stop_scan_for_this_spec) {
+								return true;
+							}
+						}
+				} 
+				else {
+					assert(!recursive_scan_dirtree);
+
+					const auto pattern_re = compile_pattern(elem.string());
+
+					// we are NOT processing a '**' wildcard, but a (wildcarded) subspec instead, e.g. "*bla*/reutel.pdf" or "*ska*.mp3"...
+					if (!sub_spec.empty())
+					{
+						// scan wildcarded directory spec element, e.g. "*bla*/" in "*bla*/reutel.pdf", hence we will only accept matching directory names here.
+						for (auto &&entry : fs::directory_iterator(basepath, fs::directory_options::skip_permission_denied)) {
+							fs::path path = entry.path();
+
+							bool is_dir = entry.is_directory();
+
+							if (is_dir)
+								cache.dir_count_scanned++;
+							else
+								cache.item_count_scanned++;
+
+							if (!is_dir)
+								continue;
+
+							auto relpath = mk_relative(path, basepath);
+							bool fn_match = fnmatch(relpath.string(), pattern_re);
+
+							options::filter_info_t fi{
+								.basepath = basepath,
+								.item_relpath = relpath,
+								.entry = entry,
+
+								.matching_wildcarded_fragment = elem,
+								.subsearch_spec = sub_spec,
+
+								.fragment_is_wildcarded = true,
+								.fragment_is_double_star = false,
+
+								//.userland_may_override_accept = true,
+								.userland_may_override_recurse_into = true,
+
+								.is_directory = true,
+								.is_hidden = is_hidden(path),
+
+								.depth = pathspec.actual_depth + 1,
+								.max_recursion_depth = pathspec.max_recursion_depth,
+
+								.item_count_scanned = cache.item_count_scanned,
+								.dir_count_scanned = cache.dir_count_scanned,
+
+								.original_search_spec_index = pathspec.original_spec_index,
+								.actual_search_spec_index = cache.searchpath_index,
+								.search_spec_count = (int)cache.searchpaths.size(),
+							};
+							options::filter_state_t fs{
+								.accept = false,
+								.recurse_into = fn_match,
+								.stop_scan_for_this_spec = false,
+								.do_report_progress = false,
+							};
+							fs = search_spec.filter(path, fs, fi);
+
+							if (fs.accept) {
+								cache.result_set.push_back(path);
+							}
+
+							if (fs.recurse_into && pathspec.actual_depth < pathspec.max_recursion_depth) {
+								searchspec spec{
+									.basepath = path,
+									.deep_spec = sub_spec,
+									.accepts_directories_only = pathspec.accepts_directories_only,
+									.basepath_exists = true,
+									.actual_depth = pathspec.actual_depth + 1,
+									.max_recursion_depth = pathspec.max_recursion_depth,
+									.original_spec_index = pathspec.original_spec_index,
+								};
+								cache.searchpaths.push_back(spec);
+							}
+
+							if (fs.do_report_progress) {
+								//.current_path = path,
+								if (!search_spec.progress_reporting(fi, fs))
+									return false;
+							}
+
+							if (fs.stop_scan_for_this_spec) {
+								return true;
+							}
+						}
+					} 
+					else {
+						// scan wildcarded filename spec element, e.g. "*ska*.mp3", hence we will accept both matching files and matching directory names here.
+						assert(sub_spec.empty());
+
+						for (auto &&entry : fs::directory_iterator(basepath, fs::directory_options::skip_permission_denied)) {
+							fs::path path = entry.path();
+
+							bool is_dir = entry.is_directory();
+
+							if (is_dir)
+								cache.dir_count_scanned++;
+							else
+								cache.item_count_scanned++;
+
+							auto relpath = mk_relative(path, basepath);
+							bool fn_match = fnmatch(relpath.string(), pattern_re);
+
+							options::filter_info_t fi{
+								.basepath = basepath,
+								.item_relpath = relpath,
+								.entry = entry,
+
+								.matching_wildcarded_fragment = elem,
+								.subsearch_spec = "",
+
+								.fragment_is_wildcarded = true,
+								.fragment_is_double_star = false,
+
+								//.userland_may_override_accept = true,
+								.userland_may_override_recurse_into = is_dir,
+
+								.is_directory = is_dir,
+								.is_hidden = is_hidden(path),
+
+								.depth = pathspec.actual_depth,
+								.max_recursion_depth = pathspec.max_recursion_depth,
+
+								.item_count_scanned = cache.item_count_scanned,
+								.dir_count_scanned = cache.dir_count_scanned,
+
+								.original_search_spec_index = pathspec.original_spec_index,
+								.actual_search_spec_index = cache.searchpath_index,
+								.search_spec_count = (int)cache.searchpaths.size(),
+							};
+							options::filter_state_t fs{
+								.accept = (search_spec.include_hidden_entries || !fi.is_hidden) &&
+													(is_dir ? search_spec.include_matching_directories : search_spec.include_matching_files && !pathspec.accepts_directories_only /* && fs::exists(path) */) &&
+													fn_match,
+								.recurse_into = false,
+								.stop_scan_for_this_spec = false,
+								.do_report_progress = false,
+							};
+							fs = search_spec.filter(path, fs, fi);
+
+							if (fs.accept) {
+								cache.result_set.push_back(path);
+							}
+
+							// Note: we do accept a 'recurse_info' override by userland filter here anyway, while the original search spec didn't mandate/suppose that sort of thing.
+							// Userland overrides work both ways...
+							if (fs.recurse_into && is_dir && pathspec.actual_depth < pathspec.max_recursion_depth) {
+								searchspec spec{
+									.basepath = path,
+									.deep_spec = "*",
+									.accepts_directories_only = false,   // we drop this requirement here as the userland override has us going out of original scope already.
+									.basepath_exists = true,
+									.actual_depth = pathspec.actual_depth + 1,
+									.max_recursion_depth = pathspec.max_recursion_depth,
+									.original_spec_index = pathspec.original_spec_index,
+								};
+								cache.searchpaths.push_back(spec);
+							}
+
+							if (fs.do_report_progress) {
+								//.current_path = path,
+								if (!search_spec.progress_reporting(fi, fs))
+									return false;
+							}
+
+							if (fs.stop_scan_for_this_spec) {
+								return true;
+							}
+						}
+					}
+				}
+
+				// all done.
+				break;
+			}
+		}
+	}
+	catch (std::exception& ex) {
+		// not a directory
+		// do nothing
+		fs::path searchpath = pathspec.deep_spec / pathspec.deep_spec;
+		auto msg = std::format("{}: {}\n", searchpath.string(), ex.what());
+		cache.error_msg.push_back(msg);
+	}
+
+	return true;
 }
 
 } // namespace end
@@ -527,11 +1349,86 @@ std::vector<fs::path> rglob_path(const std::string& basepath, const std::initial
 }
 
 
+static inline 
+std::vector<fs::path> glob(const options &search_spec) {
+	options spec(search_spec);
+	return glob(spec);
+}
+
+static inline 
+std::vector<fs::path> glob(options &search_spec) {
+	cached_options cache;
+
+	while (glob_42(cache, search_spec)) {
+		cache.searchpath_index++;
+	}
+
+	return cache.result_set;
+}
+
+
+// filter callback: returns pass/reject for given path; this can override the default glob reject/accept logic in either direction
+// as both rejected and accepted entries are fed to this callback method.
+options::filter_state_t options::filter(fs::path path, options::filter_state_t glob_says_pass, const options::filter_info_t &info) {
+	return glob_says_pass;
+}
+
+// progress callback: shows currently processed path, pass/reject status and progress/scan completion estimate.
+// Return `false` to abort the glob action.
+bool options::progress_reporting(const progress_info_t &info, const filter_state_t state) {
+	return true;
+}
+
+
 /// Helper function: expand '~' HOME part (when used in the path) and normalize the given path.
 static inline 
 fs::path expand_and_normalize_tilde(fs::path path) {
 	path = expand_tilde(path);
 	return path.lexically_normal();
+}
+
+namespace {
+
+	struct SLHash {
+		size_t operator() (const fs::path &p) const {
+			std::string_view temp{p.string()};
+			size_t h = temp.size() ^ 0x01425F;
+			for (auto i = temp.cbegin(); i != temp.cend(); i++) {
+				auto c = *i;
+				h ^= 143 * c;
+				h += h >> 9;
+			}
+			return h;
+		}
+	};
+
+	struct SLKeyCompare {
+		bool operator() (fs::path const& lhs, fs::path const& rhs) const {
+			return lhs == rhs;
+		}
+	};
+
+}
+
+static inline 
+bool follow_symlink(fs::directory_entry &entry) {
+	if (entry.exists() && entry.is_symlink()) {
+		// prevent symlink loops from locking up the loop:
+		std::unordered_set<fs::path, SLHash, SLKeyCompare> symlink_loop_detector;
+		symlink_loop_detector.insert(entry.path());
+		do {
+			auto new_path = fs::read_symlink(entry.path());
+			if (symlink_loop_detector.contains(new_path)) {
+				// symlink loop detected! abort!
+				break;
+			}
+			symlink_loop_detector.insert(new_path);
+			entry.assign(new_path);
+			entry.refresh();
+		} while (entry.is_symlink());
+		return true;
+	}
+	return false;
 }
 
 } // namespace glob

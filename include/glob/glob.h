@@ -21,18 +21,10 @@
 // to prevent mishaps, use the GHC-provided filesystem selector headerfile: ghc/fs_std.hpp
 // which listens to both system availability of std::filesystem and the GHC_DO_NOT_USE_STD_FS
 // overriding switch/define.
-#if 0
-
-#include <ghc/filesystem.hpp>
-#if __has_include(<filesystem>)
-#include <filesystem>
-#endif
-
-#else
-
+// 
+// This GHC headerfile also outputs a GHC_USE_GHC_FS define when ghc::filesystem has been loaded instead of std::filesystem.
+//
 #include <ghc/fs_std.hpp>  // namespace fs = std::filesystem;   or   namespace fs = ghc::filesystem;
-
-#endif
 
 // https://stackoverflow.com/questions/1537964/visual-c-equivalent-of-gccs-attribute-packed
 

@@ -1,4 +1,8 @@
+#if !defined(SINGLE_INCLUDE_GLOB_HPP) && 0
 #include <glob/glob.h>
+#else
+#include "../../single_include/glob/glob.hpp"
+#endif
 #include <glob/version.h>
 
 #include <clipp.h>
