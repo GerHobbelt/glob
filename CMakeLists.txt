@@ -8,6 +8,11 @@ project(
         LANGUAGES CXX
 )
 
+set(GLOB_MAIN_PROJECT FALSE)
+if ((CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR) AND (CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME))
+  set(GLOB_MAIN_PROJECT TRUE)
+endif()
+
 # ---- Options ----
 option(GLOB_USE_GHC_FILESYSTEM "Use ghc::filesystem instead of std::filesystem" OFF)
 
@@ -23,6 +28,7 @@ endif ()
 # ---- Add dependencies via CPM ----
 # see https://github.com/TheLartians/CPM.cmake for more info
 
+if (GLOB_MAIN_PROJECT)
 include(cmake/CPM.cmake)
 
 # PackageProject.cmake will be used to make our target installable
@@ -39,6 +45,8 @@ CPMAddPackage(
         VERSION 1.16.0
         OPTIONS "INSTALL_GTEST OFF" "gtest_force_shared_crt"
 )
+endif()
+
 # For Windows: Prevent overriding the parent project's compiler/linker settings
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 
@@ -82,6 +90,7 @@ target_include_directories(
 # header paths
 string(TOLOWER ${PROJECT_NAME}/version.h VERSION_HEADER_LOCATION)
 
+if (GLOB_MAIN_PROJECT)
 packageProject(
         NAME ${PROJECT_NAME}
         VERSION ${PROJECT_VERSION}
@@ -106,3 +115,4 @@ target_compile_definitions(glob_tests_single PRIVATE USE_SINGLE_HEADER=1)
 target_link_libraries(glob_tests_single PRIVATE gtest_main)
 target_include_directories(glob_tests_single PRIVATE single_include)
 add_test(NAME glob_tests_single COMMAND glob_tests_single)
+endif()
