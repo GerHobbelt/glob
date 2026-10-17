@@ -138,6 +138,26 @@ namespace glob {
 			return std::string{"(("} + result_string + std::string{R"()|[\r\n])$)"};
 		}
 
+#ifdef _WIN32
+#include <cstdlib>
+
+		inline std::string get_env(const char* var) {
+			char* buffer = nullptr;
+			size_t size = 0;
+			if (_dupenv_s(&buffer, &size, var) == 0 && buffer != nullptr) {
+				std::string result(buffer);
+				free(buffer);
+				return result;
+			}
+			return {};
+		}
+#else
+		inline std::string get_env(const char* var) {
+			const char* value = std::getenv(var);
+			return value ? std::string(value) : "";
+		}
+#endif
+
 		fs::path expand_tilde(fs::path path) {
 			if (path.empty()) return path;
 
